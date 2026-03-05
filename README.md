@@ -9,8 +9,8 @@ A desktop app that turns your AI coding agents into animated pixel art character
 ```bash
 # Prerequisites: Rust (rustup.rs), Node.js 18+, Xcode CLI tools (macOS) or webkit2gtk (Linux)
 
-git clone --recursive https://github.com/liuyixin-louis/agentroom-visual.git
-cd agentroom-visual
+git clone --recursive https://github.com/liuyixin-louis/agentroom.git
+cd agentroom
 
 # Build the CASS search backend (~5 min, one-time)
 ./scripts/install-cass.sh
@@ -120,8 +120,8 @@ nvm install 22
 ### Step 3 -- Clone with Submodules
 
 ```bash
-git clone --recursive https://github.com/liuyixin-louis/agentroom-visual.git
-cd agentroom-visual
+git clone --recursive https://github.com/liuyixin-louis/agentroom.git
+cd agentroom
 ```
 
 > Already cloned without `--recursive`? Run `git submodule update --init --recursive`
