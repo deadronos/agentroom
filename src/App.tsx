@@ -258,18 +258,20 @@ function App() {
   }
 
   return (
-    <div className={`app ${mainView === 'sessions' ? 'app-sessions-view' : ''} ${selectedSession && mainView === 'office' ? 'app-with-panel' : ''}`}>
+    <div data-testid="app-root" className={`app ${mainView === 'sessions' ? 'app-sessions-view' : ''} ${selectedSession && mainView === 'office' ? 'app-with-panel' : ''}`}>
       {/* Sidebar: Search + Session List */}
-      <div className="sidebar">
+      <div className="sidebar" data-testid="sidebar">
         {/* View Switcher */}
-        <div className="main-view-toggle">
+        <div className="main-view-toggle" data-testid="view-switcher">
           <button
+            data-testid="tab-office"
             className={mainView === 'office' ? 'active' : ''}
             onClick={() => setMainView('office')}
           >
             Agent Office
           </button>
           <button
+            data-testid="tab-sessions"
             className={mainView === 'sessions' ? 'active' : ''}
             onClick={() => setMainView('sessions')}
           >
@@ -302,8 +304,8 @@ function App() {
 
       {/* Main content area: Office or Sessions view */}
       {mainView === 'office' ? (
-        <div className="main-panel">
-          <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
+        <div className="main-panel" data-testid="main-panel-office">
+          <div ref={containerRef} data-testid="office-container" style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
             <OfficeCanvas
               officeState={officeState}
               onClick={handleClick}
@@ -348,7 +350,7 @@ function App() {
         </div>
       ) : (
         /* Sessions full view — transcript fills the main area */
-        <div className="main-panel main-panel-sessions">
+        <div className="main-panel main-panel-sessions" data-testid="main-panel-sessions">
           {selectedSession ? (
             <SessionPanel
               session={selectedSession}

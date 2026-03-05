@@ -60,7 +60,7 @@ export function TokenPanel() {
   if (!snapshot || snapshot.entries.length === 0) return null;
 
   return (
-    <div className="token-panel">
+    <div className="token-panel" data-testid="token-panel">
       {snapshot.entries.map((entry) => {
         const color = PROVIDER_COLORS[entry.provider] || "#888";
         const label = PROVIDER_LABELS[entry.provider] || entry.provider;

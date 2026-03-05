@@ -66,12 +66,12 @@ export function SessionPanel({ session, onClose }: Props) {
   const filename = session.sourcePath.split('/').pop() || session.sourcePath
 
   return (
-    <div className="session-panel">
+    <div className="session-panel" data-testid="session-panel">
       <div className="sp-header">
         <div className="sp-title-row">
-          <span className="sp-agent-badge">{agentLabel}</span>
-          <h3 className="sp-title">{session.title || filename}</h3>
-          <button className="sp-close" onClick={onClose} title="Close panel">x</button>
+          <span className="sp-agent-badge" data-testid="sp-agent-badge">{agentLabel}</span>
+          <h3 className="sp-title" data-testid="sp-title">{session.title || filename}</h3>
+          <button className="sp-close" data-testid="sp-close" onClick={onClose} title="Close panel">x</button>
         </div>
         {session.workspace && (
           <div className="sp-workspace">{session.workspace}</div>
@@ -80,6 +80,7 @@ export function SessionPanel({ session, onClose }: Props) {
           {canResume && (
             <button
               className="sp-resume-btn"
+              data-testid="sp-resume-btn"
               onClick={handleResume}
               disabled={resuming}
             >
@@ -92,7 +93,7 @@ export function SessionPanel({ session, onClose }: Props) {
         </div>
       </div>
 
-      <div className="sp-transcript" ref={transcriptRef}>
+      <div className="sp-transcript" data-testid="sp-transcript" ref={transcriptRef}>
         {loading ? (
           <div className="sp-loading">Loading transcript...</div>
         ) : messages.length === 0 ? (

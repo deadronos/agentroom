@@ -65,7 +65,7 @@ export function StatusBar({ sessions, tags, onTagUpdate }: Props) {
     : "Tag All";
 
   return (
-    <div className="status-bar">
+    <div className="status-bar" data-testid="status-bar">
       <div className="status-indicator">
         <span className={`dot ${healthy === true ? "green" : healthy === false ? "red" : "gray"}`} />
         <span>CASS {healthy === true ? "healthy" : healthy === false ? "offline" : "checking..."}</span>

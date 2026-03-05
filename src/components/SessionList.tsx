@@ -58,6 +58,7 @@ function SessionCard({
   return (
     <div
       className={`session-card ${selected ? "selected" : ""}`}
+      data-testid={`session-card-${session.id}`}
       onClick={() => onSelect(session)}
     >
       <span className="agent-icon">
@@ -161,7 +162,7 @@ export function SessionList({
     : null;
 
   return (
-    <div className="session-list">
+    <div className="session-list" data-testid="session-list">
       {/* Focus indicator bar */}
       {focusedBasename && (
         <div className="focus-indicator">
@@ -187,8 +188,8 @@ export function SessionList({
 
       {groupedSessions && viewMode === "grouped" ? (
         groupedSessions.map(([projectName, groupSessions]) => (
-          <div key={projectName} className="session-group">
-            <div className="group-header" onClick={() => {
+          <div key={projectName} className="session-group" data-testid={`project-group-${projectName}`}>
+            <div className="group-header" data-testid={`group-header-${projectName}`} onClick={() => {
               toggleGroup(projectName);
               // Also focus watcher on this project
               const ws = getWorkspace(projectName);

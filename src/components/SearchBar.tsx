@@ -103,23 +103,24 @@ export function SearchBar({
   };
 
   return (
-    <div className="search-bar">
+    <div className="search-bar" data-testid="search-bar">
       <div className="search-controls">
         <input
           ref={inputRef}
           type="text"
+          data-testid="search-input"
           placeholder="Search sessions... (⌘K)"
           value={value}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
         />
-        <select value={agent} onChange={handleAgentChange} aria-label="Filter by agent">
+        <select data-testid="agent-filter" value={agent} onChange={handleAgentChange} aria-label="Filter by agent">
           <option value="all">All agents</option>
           <option value="claude-code">Claude</option>
           <option value="codex">Codex</option>
           <option value="gemini">Gemini</option>
         </select>
-        <select value={category} onChange={handleCategoryChange} aria-label="Filter by category">
+        <select data-testid="category-filter" value={category} onChange={handleCategoryChange} aria-label="Filter by category">
           <option value="all">All categories</option>
           {categories.map((item) => (
             <option key={item} value={item}>
