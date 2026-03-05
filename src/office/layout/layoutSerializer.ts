@@ -263,67 +263,53 @@ export function createDefaultLayout(): OfficeLayout {
     }
   }
 
-  const furniture: PlacedFurniture[] = [
-    // ── Work Room (left) — desks arranged in rows ──
-    { uid: 'desk-w1', type: FurnitureType.DESK, col: 2, row: 3 },
-    { uid: 'desk-w2', type: FurnitureType.DESK, col: 6, row: 3 },
-    { uid: 'desk-w3', type: FurnitureType.DESK, col: 2, row: 9 },
-    { uid: 'desk-w4', type: FurnitureType.DESK, col: 6, row: 9 },
-    { uid: 'desk-w5', type: FurnitureType.DESK, col: 2, row: 15 },
-    { uid: 'desk-w6', type: FurnitureType.DESK, col: 6, row: 15 },
-    { uid: 'chair-w1', type: FurnitureType.CHAIR, col: 2, row: 5 },
-    { uid: 'chair-w2', type: FurnitureType.CHAIR, col: 3, row: 5 },
-    { uid: 'chair-w3', type: FurnitureType.CHAIR, col: 6, row: 5 },
-    { uid: 'chair-w4', type: FurnitureType.CHAIR, col: 7, row: 5 },
-    { uid: 'chair-w5', type: FurnitureType.CHAIR, col: 2, row: 11 },
-    { uid: 'chair-w6', type: FurnitureType.CHAIR, col: 3, row: 11 },
-    { uid: 'chair-w7', type: FurnitureType.CHAIR, col: 6, row: 11 },
-    { uid: 'chair-w8', type: FurnitureType.CHAIR, col: 7, row: 11 },
-    { uid: 'chair-w9', type: FurnitureType.CHAIR, col: 2, row: 17 },
-    { uid: 'chair-w10', type: FurnitureType.CHAIR, col: 3, row: 17 },
-    { uid: 'chair-w11', type: FurnitureType.CHAIR, col: 6, row: 17 },
-    { uid: 'chair-w12', type: FurnitureType.CHAIR, col: 7, row: 17 },
-    { uid: 'monitor-w1', type: FurnitureType.MONITOR, col: 2, row: 3 },
-    { uid: 'monitor-w2', type: FurnitureType.MONITOR, col: 3, row: 3 },
-    { uid: 'monitor-w3', type: FurnitureType.MONITOR, col: 6, row: 3 },
-    { uid: 'monitor-w4', type: FurnitureType.MONITOR, col: 7, row: 3 },
-    { uid: 'monitor-w5', type: FurnitureType.MONITOR, col: 2, row: 9 },
-    { uid: 'monitor-w6', type: FurnitureType.MONITOR, col: 3, row: 9 },
-    { uid: 'monitor-w7', type: FurnitureType.MONITOR, col: 6, row: 9 },
-    { uid: 'monitor-w8', type: FurnitureType.MONITOR, col: 7, row: 9 },
-    { uid: 'monitor-w9', type: FurnitureType.MONITOR, col: 2, row: 15 },
-    { uid: 'monitor-w10', type: FurnitureType.MONITOR, col: 3, row: 15 },
-    { uid: 'monitor-w11', type: FurnitureType.MONITOR, col: 6, row: 15 },
-    { uid: 'monitor-w12', type: FurnitureType.MONITOR, col: 7, row: 15 },
-    { uid: 'bookshelf-w1', type: FurnitureType.BOOKSHELF, col: 11, row: 1 },
-    { uid: 'plant-w1', type: FurnitureType.PLANT, col: 10, row: 1 },
+  // Generate dense furniture layout programmatically
+  const furniture: PlacedFurniture[] = []
 
-    // ── Idle Room (right) — couches, plants, relaxation ──
-    // Left column of couches
-    { uid: 'couch-i1', type: FurnitureType.COUCH, col: 18, row: 4 },
-    { uid: 'couch-i2', type: FurnitureType.COUCH, col: 18, row: 6 },
-    { uid: 'couch-i3', type: FurnitureType.COUCH, col: 18, row: 10 },
-    { uid: 'couch-i4', type: FurnitureType.COUCH, col: 18, row: 12 },
-    { uid: 'couch-i5', type: FurnitureType.COUCH, col: 18, row: 16 },
-    { uid: 'couch-i6', type: FurnitureType.COUCH, col: 18, row: 18 },
-    // Right column of couches
-    { uid: 'couch-i7', type: FurnitureType.COUCH, col: 25, row: 4 },
-    { uid: 'couch-i8', type: FurnitureType.COUCH, col: 25, row: 6 },
-    { uid: 'couch-i9', type: FurnitureType.COUCH, col: 25, row: 10 },
-    { uid: 'couch-i10', type: FurnitureType.COUCH, col: 25, row: 12 },
-    { uid: 'couch-i11', type: FurnitureType.COUCH, col: 25, row: 16 },
-    { uid: 'couch-i12', type: FurnitureType.COUCH, col: 25, row: 18 },
-    { uid: 'vending-1', type: FurnitureType.VENDING_MACHINE, col: 27, row: 1 },
-    { uid: 'cooler-i1', type: FurnitureType.COOLER, col: 17, row: 1 },
-    { uid: 'plant-i1', type: FurnitureType.PLANT, col: 16, row: 1 },
-    { uid: 'plant-i2', type: FurnitureType.PLANT, col: 16, row: 19 },
-    { uid: 'plant-i3', type: FurnitureType.PLANT, col: 27, row: 19 },
-    { uid: 'plant-i4', type: FurnitureType.PLANT, col: 22, row: 8 },
-    { uid: 'plant-i5', type: FurnitureType.PLANT, col: 22, row: 14 },
-    { uid: 'lamp-i1', type: FurnitureType.LAMP, col: 21, row: 4 },
-    { uid: 'lamp-i2', type: FurnitureType.LAMP, col: 21, row: 10 },
-    { uid: 'lamp-i3', type: FurnitureType.LAMP, col: 21, row: 16 },
-  ]
+  // ── Work Room (left) — 3 desk columns × 5 rows = 30 work seats ──
+  // Desk columns at cols 2, 6, 10 (each desk is 2 wide)
+  // Desk rows: 2, 6, 10, 14, 18 (each desk is 2 tall; chairs 2 rows below)
+  const deskCols = [2, 6, 10]
+  const deskRows = [2, 6, 10, 14, 18]
+  let wIdx = 0
+  for (const dRow of deskRows) {
+    for (const dCol of deskCols) {
+      wIdx++
+      const chairRow = dRow + 2
+      furniture.push({ uid: `desk-w${wIdx}`, type: FurnitureType.DESK, col: dCol, row: dRow })
+      furniture.push({ uid: `monitor-w${wIdx}a`, type: FurnitureType.MONITOR, col: dCol, row: dRow })
+      furniture.push({ uid: `monitor-w${wIdx}b`, type: FurnitureType.MONITOR, col: dCol + 1, row: dRow })
+      furniture.push({ uid: `chair-w${wIdx}a`, type: FurnitureType.CHAIR, col: dCol, row: chairRow })
+      furniture.push({ uid: `chair-w${wIdx}b`, type: FurnitureType.CHAIR, col: dCol + 1, row: chairRow })
+    }
+  }
+  // Work room decor
+  furniture.push({ uid: 'bookshelf-w1', type: FurnitureType.BOOKSHELF, col: 12, row: 1 })
+  furniture.push({ uid: 'plant-w1', type: FurnitureType.PLANT, col: 1, row: 1 })
+  furniture.push({ uid: 'plant-w2', type: FurnitureType.PLANT, col: 12, row: 20 })
+
+  // ── Idle Room (right) — 3 couch columns × 5 rows = 30 idle seats ──
+  // Couch columns at cols 17, 21, 25 (each couch is 2 wide)
+  // Couch rows: 3, 7, 11, 15, 19
+  const couchCols = [17, 21, 25]
+  const couchRows = [3, 7, 11, 15, 19]
+  let iIdx = 0
+  for (const cRow of couchRows) {
+    for (const cCol of couchCols) {
+      iIdx++
+      furniture.push({ uid: `couch-i${iIdx}`, type: FurnitureType.COUCH, col: cCol, row: cRow })
+    }
+  }
+  // Idle room decor
+  furniture.push({ uid: 'vending-1', type: FurnitureType.VENDING_MACHINE, col: 27, row: 1 })
+  furniture.push({ uid: 'cooler-i1', type: FurnitureType.COOLER, col: 16, row: 1 })
+  furniture.push({ uid: 'plant-i1', type: FurnitureType.PLANT, col: 28, row: 1 })
+  furniture.push({ uid: 'plant-i2', type: FurnitureType.PLANT, col: 16, row: 20 })
+  furniture.push({ uid: 'plant-i3', type: FurnitureType.PLANT, col: 28, row: 20 })
+  furniture.push({ uid: 'lamp-i1', type: FurnitureType.LAMP, col: 20, row: 5 })
+  furniture.push({ uid: 'lamp-i2', type: FurnitureType.LAMP, col: 24, row: 9 })
+  furniture.push({ uid: 'lamp-i3', type: FurnitureType.LAMP, col: 20, row: 13 })
+  furniture.push({ uid: 'lamp-i4', type: FurnitureType.LAMP, col: 24, row: 17 })
 
   return {
     version: 1,
