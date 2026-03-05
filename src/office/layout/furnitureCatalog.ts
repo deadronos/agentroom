@@ -9,6 +9,11 @@ import {
   CHAIR_SPRITE,
   PC_SPRITE,
   LAMP_SPRITE,
+  MEETING_TABLE_SPRITE,
+  COUCH_SPRITE,
+  VENDING_MACHINE_SPRITE,
+  MONITOR_SPRITE,
+  ARCADE_SPRITE,
 } from '../sprites/spriteData.js'
 
 export interface LoadedAssetData {
@@ -47,7 +52,12 @@ export const FURNITURE_CATALOG: CatalogEntryWithCategory[] = [
   { type: FurnitureType.CHAIR,      label: 'Chair',      footprintW: 1, footprintH: 1, sprite: CHAIR_SPRITE,        isDesk: false, category: 'chairs' },
   { type: FurnitureType.PC,         label: 'PC',         footprintW: 1, footprintH: 1, sprite: PC_SPRITE,           isDesk: false, category: 'electronics' },
   { type: FurnitureType.LAMP,       label: 'Lamp',       footprintW: 1, footprintH: 1, sprite: LAMP_SPRITE,         isDesk: false, category: 'decor' },
-
+  // Phase 3 additions
+  { type: FurnitureType.MEETING_TABLE,    label: 'Meeting Table',    footprintW: 4, footprintH: 2, sprite: MEETING_TABLE_SPRITE,    isDesk: true,  category: 'desks' },
+  { type: FurnitureType.COUCH,            label: 'Couch',            footprintW: 2, footprintH: 1, sprite: COUCH_SPRITE,            isDesk: false, category: 'chairs' },
+  { type: FurnitureType.VENDING_MACHINE,  label: 'Vending Machine',  footprintW: 1, footprintH: 2, sprite: VENDING_MACHINE_SPRITE,  isDesk: false, category: 'misc' },
+  { type: FurnitureType.MONITOR,          label: 'Monitor',          footprintW: 1, footprintH: 1, sprite: MONITOR_SPRITE,          isDesk: false, category: 'electronics', canPlaceOnSurfaces: true },
+  { type: FurnitureType.ARCADE,           label: 'Arcade',           footprintW: 1, footprintH: 2, sprite: ARCADE_SPRITE,           isDesk: false, category: 'misc' },
 ]
 
 // ── Rotation groups ──────────────────────────────────────────────

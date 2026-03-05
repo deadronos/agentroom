@@ -13,6 +13,7 @@ export interface AgentEventPayload {
   tool_status?: string
   is_subagent?: boolean
   parent_tool_id?: string
+  agent_type?: string
 }
 
 export function listenAgentEvents(
@@ -29,6 +30,12 @@ export async function stopWatching(): Promise<string> {
   return invoke<string>('stop_watching')
 }
 
+/** Stop current watcher and start a new one for a different project */
+export async function switchWatching(projectDir: string): Promise<string> {
+  await stopWatching()
+  return startWatching(projectDir)
+}
+
 export async function getActiveAgents(): Promise<string> {
   return invoke<string>('get_active_agents')
 }
@@ -42,6 +49,15 @@ export async function loadLayout(projectId: string): Promise<unknown | null> {
   try {
     const result = await invoke<string>('load_visual_layout', { projectId })
     return JSON.parse(result)
+  } catch {
+    return null
+  }
+}
+
+export async function readCodexBarSnapshot(): Promise<unknown | null> {
+  try {
+    const raw = await invoke<string>('read_codexbar_snapshot')
+    return JSON.parse(raw)
   } catch {
     return null
   }

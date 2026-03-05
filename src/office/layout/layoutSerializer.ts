@@ -2,6 +2,7 @@ import { TileType, FurnitureType, DEFAULT_COLS, DEFAULT_ROWS, TILE_SIZE, Directi
 import type { TileType as TileTypeVal, OfficeLayout, PlacedFurniture, Seat, FurnitureInstance, FloorColor } from '../types.js'
 import { getCatalogEntry } from './furnitureCatalog.js'
 import { getColorizedSprite } from '../colorize.js'
+import { OFFICE_MAP_GIDS } from '../tilesets/officeMapGids.js'
 
 /** Convert flat tile array from layout into 2D grid */
 export function layoutToTileMap(layout: OfficeLayout): TileTypeVal[][] {
@@ -204,67 +205,135 @@ export function getSeatTiles(seats: Map<string, Seat>): Set<string> {
   return tiles
 }
 
-/** Default floor colors for the two rooms */
-const DEFAULT_LEFT_ROOM_COLOR: FloorColor = { h: 35, s: 30, b: 15, c: 0 }  // warm beige
-const DEFAULT_RIGHT_ROOM_COLOR: FloorColor = { h: 25, s: 45, b: 5, c: 10 }  // warm brown
-const DEFAULT_CARPET_COLOR: FloorColor = { h: 280, s: 40, b: -5, c: 0 }     // purple
-const DEFAULT_DOORWAY_COLOR: FloorColor = { h: 35, s: 25, b: 10, c: 0 }     // tan
+/** Default floor colors */
+const WORK_ROOM_COLOR: FloorColor = { h: 35, s: 30, b: 15, c: 0 }    // warm beige
+const IDLE_ROOM_COLOR: FloorColor = { h: 280, s: 40, b: -5, c: 0 }   // purple
+const CORRIDOR_COLOR: FloorColor = { h: 35, s: 25, b: 10, c: 0 }     // tan
 
-/** Create the default office layout matching the current hardcoded office */
+/**
+ * Create the default 30×22 office layout with 2 rooms:
+ *   Work Room (left):  rows 1-20, cols 1-12  — desks, chairs, monitors
+ *   Idle Room (right): rows 1-20, cols 16-28 — couches, plants, relaxation
+ * Connected by a central corridor (cols 13-15).
+ */
 export function createDefaultLayout(): OfficeLayout {
   const W = TileType.WALL
-  const F1 = TileType.FLOOR_1
-  const F2 = TileType.FLOOR_2
-  const F3 = TileType.FLOOR_3
-  const F4 = TileType.FLOOR_4
+  const F1 = TileType.FLOOR_1  // Work Room
+  const F3 = TileType.FLOOR_3  // Idle Room
+  const F4 = TileType.FLOOR_4  // Corridor
 
   const tiles: TileTypeVal[] = []
   const tileColors: Array<FloorColor | null> = []
 
   for (let r = 0; r < DEFAULT_ROWS; r++) {
     for (let c = 0; c < DEFAULT_COLS; c++) {
-      if (r === 0 || r === DEFAULT_ROWS - 1) { tiles.push(W); tileColors.push(null); continue }
-      if (c === 0 || c === DEFAULT_COLS - 1) { tiles.push(W); tileColors.push(null); continue }
-      if (c === 10) {
-        if (r >= 4 && r <= 6) {
-          tiles.push(F4); tileColors.push(DEFAULT_DOORWAY_COLOR)
+      // Outer walls
+      if (r === 0 || r === DEFAULT_ROWS - 1 || c === 0 || c === DEFAULT_COLS - 1) {
+        tiles.push(W); tileColors.push(null); continue
+      }
+
+      // Vertical divider walls at cols 13 and 15 (corridor walls)
+      if (c === 13 || c === 15) {
+        // Doorways: 2-tile gaps at rows 10-11
+        if (r >= 10 && r <= 11) {
+          tiles.push(F4); tileColors.push(CORRIDOR_COLOR)
         } else {
           tiles.push(W); tileColors.push(null)
         }
         continue
       }
-      if (c >= 15 && c <= 18 && r >= 7 && r <= 9) {
-        tiles.push(F3); tileColors.push(DEFAULT_CARPET_COLOR); continue
+
+      // Corridor: col 14
+      if (c === 14) {
+        tiles.push(F4); tileColors.push(CORRIDOR_COLOR); continue
       }
-      if (c < 10) {
-        tiles.push(F1); tileColors.push(DEFAULT_LEFT_ROOM_COLOR)
-      } else {
-        tiles.push(F2); tileColors.push(DEFAULT_RIGHT_ROOM_COLOR)
+
+      // Work Room (left): rows 1-20, cols 1-12
+      if (r >= 1 && r <= 20 && c >= 1 && c <= 12) {
+        tiles.push(F1); tileColors.push(WORK_ROOM_COLOR); continue
       }
+
+      // Idle Room (right): rows 1-20, cols 16-28
+      if (r >= 1 && r <= 20 && c >= 16 && c <= 28) {
+        tiles.push(F3); tileColors.push(IDLE_ROOM_COLOR); continue
+      }
+
+      // Default: wall
+      tiles.push(W); tileColors.push(null)
     }
   }
 
   const furniture: PlacedFurniture[] = [
-    { uid: 'desk-left', type: FurnitureType.DESK, col: 4, row: 3 },
-    { uid: 'desk-right', type: FurnitureType.DESK, col: 13, row: 3 },
-    { uid: 'bookshelf-1', type: FurnitureType.BOOKSHELF, col: 1, row: 5 },
-    { uid: 'plant-left', type: FurnitureType.PLANT, col: 1, row: 1 },
-    { uid: 'cooler-1', type: FurnitureType.COOLER, col: 17, row: 7 },
-    { uid: 'plant-right', type: FurnitureType.PLANT, col: 18, row: 1 },
-    { uid: 'whiteboard-1', type: FurnitureType.WHITEBOARD, col: 15, row: 0 },
-    // Left desk chairs
-    { uid: 'chair-l-top', type: FurnitureType.CHAIR, col: 4, row: 2 },
-    { uid: 'chair-l-bottom', type: FurnitureType.CHAIR, col: 5, row: 5 },
-    { uid: 'chair-l-left', type: FurnitureType.CHAIR, col: 3, row: 4 },
-    { uid: 'chair-l-right', type: FurnitureType.CHAIR, col: 6, row: 3 },
-    // Right desk chairs
-    { uid: 'chair-r-top', type: FurnitureType.CHAIR, col: 13, row: 2 },
-    { uid: 'chair-r-bottom', type: FurnitureType.CHAIR, col: 14, row: 5 },
-    { uid: 'chair-r-left', type: FurnitureType.CHAIR, col: 12, row: 4 },
-    { uid: 'chair-r-right', type: FurnitureType.CHAIR, col: 15, row: 3 },
+    // ── Work Room (left) — desks arranged in rows ──
+    { uid: 'desk-w1', type: FurnitureType.DESK, col: 2, row: 3 },
+    { uid: 'desk-w2', type: FurnitureType.DESK, col: 6, row: 3 },
+    { uid: 'desk-w3', type: FurnitureType.DESK, col: 2, row: 9 },
+    { uid: 'desk-w4', type: FurnitureType.DESK, col: 6, row: 9 },
+    { uid: 'desk-w5', type: FurnitureType.DESK, col: 2, row: 15 },
+    { uid: 'desk-w6', type: FurnitureType.DESK, col: 6, row: 15 },
+    { uid: 'chair-w1', type: FurnitureType.CHAIR, col: 2, row: 5 },
+    { uid: 'chair-w2', type: FurnitureType.CHAIR, col: 3, row: 5 },
+    { uid: 'chair-w3', type: FurnitureType.CHAIR, col: 6, row: 5 },
+    { uid: 'chair-w4', type: FurnitureType.CHAIR, col: 7, row: 5 },
+    { uid: 'chair-w5', type: FurnitureType.CHAIR, col: 2, row: 11 },
+    { uid: 'chair-w6', type: FurnitureType.CHAIR, col: 3, row: 11 },
+    { uid: 'chair-w7', type: FurnitureType.CHAIR, col: 6, row: 11 },
+    { uid: 'chair-w8', type: FurnitureType.CHAIR, col: 7, row: 11 },
+    { uid: 'chair-w9', type: FurnitureType.CHAIR, col: 2, row: 17 },
+    { uid: 'chair-w10', type: FurnitureType.CHAIR, col: 3, row: 17 },
+    { uid: 'chair-w11', type: FurnitureType.CHAIR, col: 6, row: 17 },
+    { uid: 'chair-w12', type: FurnitureType.CHAIR, col: 7, row: 17 },
+    { uid: 'monitor-w1', type: FurnitureType.MONITOR, col: 2, row: 3 },
+    { uid: 'monitor-w2', type: FurnitureType.MONITOR, col: 3, row: 3 },
+    { uid: 'monitor-w3', type: FurnitureType.MONITOR, col: 6, row: 3 },
+    { uid: 'monitor-w4', type: FurnitureType.MONITOR, col: 7, row: 3 },
+    { uid: 'monitor-w5', type: FurnitureType.MONITOR, col: 2, row: 9 },
+    { uid: 'monitor-w6', type: FurnitureType.MONITOR, col: 3, row: 9 },
+    { uid: 'monitor-w7', type: FurnitureType.MONITOR, col: 6, row: 9 },
+    { uid: 'monitor-w8', type: FurnitureType.MONITOR, col: 7, row: 9 },
+    { uid: 'monitor-w9', type: FurnitureType.MONITOR, col: 2, row: 15 },
+    { uid: 'monitor-w10', type: FurnitureType.MONITOR, col: 3, row: 15 },
+    { uid: 'monitor-w11', type: FurnitureType.MONITOR, col: 6, row: 15 },
+    { uid: 'monitor-w12', type: FurnitureType.MONITOR, col: 7, row: 15 },
+    { uid: 'bookshelf-w1', type: FurnitureType.BOOKSHELF, col: 11, row: 1 },
+    { uid: 'plant-w1', type: FurnitureType.PLANT, col: 10, row: 1 },
+
+    // ── Idle Room (right) — couches, plants, relaxation ──
+    // Left column of couches
+    { uid: 'couch-i1', type: FurnitureType.COUCH, col: 18, row: 4 },
+    { uid: 'couch-i2', type: FurnitureType.COUCH, col: 18, row: 6 },
+    { uid: 'couch-i3', type: FurnitureType.COUCH, col: 18, row: 10 },
+    { uid: 'couch-i4', type: FurnitureType.COUCH, col: 18, row: 12 },
+    { uid: 'couch-i5', type: FurnitureType.COUCH, col: 18, row: 16 },
+    { uid: 'couch-i6', type: FurnitureType.COUCH, col: 18, row: 18 },
+    // Right column of couches
+    { uid: 'couch-i7', type: FurnitureType.COUCH, col: 25, row: 4 },
+    { uid: 'couch-i8', type: FurnitureType.COUCH, col: 25, row: 6 },
+    { uid: 'couch-i9', type: FurnitureType.COUCH, col: 25, row: 10 },
+    { uid: 'couch-i10', type: FurnitureType.COUCH, col: 25, row: 12 },
+    { uid: 'couch-i11', type: FurnitureType.COUCH, col: 25, row: 16 },
+    { uid: 'couch-i12', type: FurnitureType.COUCH, col: 25, row: 18 },
+    { uid: 'vending-1', type: FurnitureType.VENDING_MACHINE, col: 27, row: 1 },
+    { uid: 'cooler-i1', type: FurnitureType.COOLER, col: 17, row: 1 },
+    { uid: 'plant-i1', type: FurnitureType.PLANT, col: 16, row: 1 },
+    { uid: 'plant-i2', type: FurnitureType.PLANT, col: 16, row: 19 },
+    { uid: 'plant-i3', type: FurnitureType.PLANT, col: 27, row: 19 },
+    { uid: 'plant-i4', type: FurnitureType.PLANT, col: 22, row: 8 },
+    { uid: 'plant-i5', type: FurnitureType.PLANT, col: 22, row: 14 },
+    { uid: 'lamp-i1', type: FurnitureType.LAMP, col: 21, row: 4 },
+    { uid: 'lamp-i2', type: FurnitureType.LAMP, col: 21, row: 10 },
+    { uid: 'lamp-i3', type: FurnitureType.LAMP, col: 21, row: 16 },
   ]
 
-  return { version: 1, cols: DEFAULT_COLS, rows: DEFAULT_ROWS, tiles, tileColors, furniture }
+  return {
+    version: 1,
+    cols: DEFAULT_COLS,
+    rows: DEFAULT_ROWS,
+    tiles,
+    tileColors,
+    furniture,
+    backgroundGids: OFFICE_MAP_GIDS,
+  }
 }
 
 /** Serialize layout to JSON string */
@@ -309,16 +378,16 @@ function migrateLayout(layout: OfficeLayout): OfficeLayout {
         tileColors.push(null)
         break
       case 1: // was TILE_FLOOR → FLOOR_1 beige
-        tileColors.push(DEFAULT_LEFT_ROOM_COLOR)
+        tileColors.push(WORK_ROOM_COLOR)
         break
-      case 2: // was WOOD_FLOOR → FLOOR_2 brown
-        tileColors.push(DEFAULT_RIGHT_ROOM_COLOR)
+      case 2: // was WOOD_FLOOR → FLOOR_2
+        tileColors.push(IDLE_ROOM_COLOR)
         break
       case 3: // was CARPET → FLOOR_3 purple
-        tileColors.push(DEFAULT_CARPET_COLOR)
+        tileColors.push(IDLE_ROOM_COLOR)
         break
       case 4: // was DOORWAY → FLOOR_4 tan
-        tileColors.push(DEFAULT_DOORWAY_COLOR)
+        tileColors.push(CORRIDOR_COLOR)
         break
       default:
         // New tile types (5-7) without colors — use neutral gray

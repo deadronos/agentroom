@@ -1,10 +1,11 @@
 /**
  * Browser-side asset loader — replaces the Node.js extension-side assetLoader.ts
- * Loads character sprites, wall tiles, and default layout directly from public/ directory
- * using Canvas API for PNG → SpriteData conversion.
+ * Loads character sprites, wall tiles, tilesets, and default layout directly from
+ * public/ directory using Canvas API for PNG → SpriteData conversion.
  */
 import { setCharacterTemplates } from './sprites/spriteData.js'
 import { setWallSprites } from './wallTiles.js'
+import { tilesetManager } from './tilesets/tilesetManager.js'
 import type { OfficeLayout } from './types.js'
 
 // Constants matching Pixel Agents extension
@@ -78,9 +79,26 @@ function extractSprite(
 }
 
 /**
+ * 2× upscale a SpriteData: each pixel becomes a factor×factor block.
+ * Used to scale 16×24 character sprites to 32×48 for the new 32px tile size.
+ */
+export function upscaleSprite(sprite: SpriteData, factor: number): SpriteData {
+  const result: SpriteData = []
+  for (const row of sprite) {
+    const scaledRow: string[] = []
+    for (const pixel of row) {
+      for (let i = 0; i < factor; i++) scaledRow.push(pixel)
+    }
+    for (let i = 0; i < factor; i++) result.push([...scaledRow])
+  }
+  return result
+}
+
+/**
  * Load all 6 character sprite sheets from /assets/characters/char_0.png .. char_5.png
  * Each PNG is 112×96: 7 frames × 16px wide, 3 direction rows × 32px tall
  * Row 0 = down, Row 1 = up, Row 2 = right
+ * After extraction, each frame is 2× upscaled to 32×64 for the 32px tile system.
  */
 export async function loadCharacterSprites(): Promise<void> {
   const directions = ['down', 'up', 'right'] as const
@@ -98,19 +116,21 @@ export async function loadCharacterSprites(): Promise<void> {
       const frames: SpriteData[] = []
 
       for (let f = 0; f < CHAR_FRAMES_PER_ROW; f++) {
-        frames.push(extractSprite(pixels, f * CHAR_FRAME_W, rowOffsetY, CHAR_FRAME_W, CHAR_FRAME_H))
+        const raw = extractSprite(pixels, f * CHAR_FRAME_W, rowOffsetY, CHAR_FRAME_W, CHAR_FRAME_H)
+        frames.push(upscaleSprite(raw, 2))
       }
       charData[dir] = frames
     }
     characters.push(charData)
   }
 
-  console.log(`[AssetLoader] Loaded ${characters.length} character sprites`)
+  console.log(`[AssetLoader] Loaded ${characters.length} character sprites (2× upscaled to 32×64)`)
   setCharacterTemplates(characters)
 }
 
 /**
  * Load wall tiles from /assets/walls.png (64×128, 4×4 grid of 16×32 pieces)
+ * Each piece is 2× upscaled to 32×64 for the 32px tile system.
  * Piece at bitmask M: col = M % 4, row = floor(M / 4)
  */
 export async function loadWallTiles(): Promise<void> {
@@ -122,13 +142,41 @@ export async function loadWallTiles(): Promise<void> {
     for (let mask = 0; mask < WALL_BITMASK_COUNT; mask++) {
       const ox = (mask % WALL_GRID_COLS) * WALL_PIECE_WIDTH
       const oy = Math.floor(mask / WALL_GRID_COLS) * WALL_PIECE_HEIGHT
-      sprites.push(extractSprite(pixels, ox, oy, WALL_PIECE_WIDTH, WALL_PIECE_HEIGHT))
+      const raw = extractSprite(pixels, ox, oy, WALL_PIECE_WIDTH, WALL_PIECE_HEIGHT)
+      sprites.push(upscaleSprite(raw, 2))
     }
 
-    console.log(`[AssetLoader] Loaded ${sprites.length} wall tile pieces`)
+    console.log(`[AssetLoader] Loaded ${sprites.length} wall tile pieces (2× upscaled to 32×64)`)
     setWallSprites(sprites)
   } catch (err) {
     console.warn('[AssetLoader] No wall tiles found, using defaults:', err)
+  }
+}
+
+/**
+ * Load SkyOffice tileset PNGs via TilesetManager.
+ * FloorAndGround.png (firstGid=1) is the primary tileset for floor/wall background.
+ */
+export async function loadTilesets(): Promise<void> {
+  try {
+    await tilesetManager.loadTileset('/assets/tilesets/FloorAndGround.png', 1, 32, 32)
+  } catch (err) {
+    console.warn('[AssetLoader] Failed to load FloorAndGround tileset:', err)
+  }
+  try {
+    await tilesetManager.loadTileset('/assets/tilesets/Modern_Office_Black_Shadow.png', 2561, 32, 32)
+  } catch (err) {
+    console.warn('[AssetLoader] Failed to load Modern_Office tileset:', err)
+  }
+  try {
+    await tilesetManager.loadTileset('/assets/tilesets/Generic.png', 3409, 32, 32)
+  } catch (err) {
+    console.warn('[AssetLoader] Failed to load Generic tileset:', err)
+  }
+  try {
+    await tilesetManager.loadTileset('/assets/tilesets/Basement.png', 4657, 32, 32)
+  } catch (err) {
+    console.warn('[AssetLoader] Failed to load Basement tileset:', err)
   }
 }
 
@@ -152,6 +200,7 @@ export async function loadDefaultLayout(): Promise<OfficeLayout | null> {
  * Load all assets in the correct order
  */
 export async function loadAllAssets(): Promise<OfficeLayout | null> {
+  await loadTilesets()
   await loadCharacterSprites()
   await loadWallTiles()
   const layout = await loadDefaultLayout()

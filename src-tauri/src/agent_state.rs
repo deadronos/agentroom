@@ -37,11 +37,14 @@ pub struct AgentStatePayload {
     pub is_subagent: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_tool_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_type: Option<String>,
 }
 
 /// Per-agent state.
 pub struct AgentState {
     pub agent_id: String,
+    pub agent_type: Option<String>,
     pub active_tool_ids: HashSet<String>,
     pub active_tool_names: HashMap<String, String>,
     /// Sub-agent tool tracking: parent_tool_id → Set<sub_tool_id>
@@ -59,9 +62,10 @@ pub struct AgentState {
 }
 
 impl AgentState {
-    pub fn new(agent_id: String) -> Self {
+    pub fn new(agent_id: String, agent_type: Option<String>) -> Self {
         Self {
             agent_id,
+            agent_type,
             active_tool_ids: HashSet::new(),
             active_tool_names: HashMap::new(),
             subagent_tool_ids: HashMap::new(),
@@ -91,21 +95,33 @@ impl AgentStateManager {
     }
 
     /// Ensure an agent exists in the map.
-    fn ensure_agent(&mut self, agent_id: &str) -> &mut AgentState {
+    fn ensure_agent(&mut self, agent_id: &str, agent_type: Option<&str>) -> &mut AgentState {
         if !self.agents.contains_key(agent_id) {
-            self.agents
-                .insert(agent_id.to_string(), AgentState::new(agent_id.to_string()));
+            self.agents.insert(
+                agent_id.to_string(),
+                AgentState::new(agent_id.to_string(), agent_type.map(|s| s.to_string())),
+            );
+        } else if agent_type.is_some() {
+            let agent = self.agents.get_mut(agent_id).unwrap();
+            if agent.agent_type.is_none() {
+                agent.agent_type = agent_type.map(|s| s.to_string());
+            }
         }
         self.agents.get_mut(agent_id).unwrap()
     }
 
-    /// Emit an event to the frontend.
-    fn emit(&self, payload: AgentStatePayload) {
+    /// Emit an event to the frontend, injecting agent_type from stored state.
+    fn emit(&self, agent_id: &str, mut payload: AgentStatePayload) {
+        if let Some(agent) = self.agents.get(agent_id) {
+            payload.agent_type = agent.agent_type.clone();
+        }
         let _ = self.app_handle.emit("agent-state-changed", &payload);
     }
 
     /// Process a batch of AgentEvents from parsing a JSONL line.
-    pub fn process_events(&mut self, agent_id: &str, events: Vec<AgentEvent>) {
+    pub fn process_events(&mut self, agent_id: &str, agent_type: Option<&str>, events: Vec<AgentEvent>) {
+        // Ensure agent exists with type before processing events
+        self.ensure_agent(agent_id, agent_type);
         for event in events {
             self.process_event(agent_id, event);
         }
@@ -120,7 +136,7 @@ impl AgentStateManager {
                 is_subagent,
                 parent_tool_id,
             } => {
-                let agent = self.ensure_agent(agent_id);
+                let agent = self.ensure_agent(agent_id, None);
                 agent.last_activity = Instant::now();
                 agent.is_waiting = false;
                 agent.text_idle_timer_start = None;
@@ -149,7 +165,7 @@ impl AgentStateManager {
                     agent.permission_timer_start = Some(Instant::now());
                 }
 
-                self.emit(AgentStatePayload {
+                self.emit(agent_id, AgentStatePayload {
                     agent_id: agent_id.to_string(),
                     status: "tool_start".to_string(),
                     tool_name: Some(tool_name),
@@ -157,6 +173,7 @@ impl AgentStateManager {
                     tool_status: Some(status),
                     is_subagent: if is_subagent { Some(true) } else { None },
                     parent_tool_id,
+                    agent_type: None,
                 });
             }
 
@@ -165,7 +182,7 @@ impl AgentStateManager {
                 is_subagent,
                 parent_tool_id,
             } => {
-                let agent = self.ensure_agent(agent_id);
+                let agent = self.ensure_agent(agent_id, None);
                 agent.last_activity = Instant::now();
 
                 if is_subagent {
@@ -195,7 +212,7 @@ impl AgentStateManager {
                 // Emit tool_done (in production, this would be delayed by TOOL_DONE_DELAY_MS)
                 // For simplicity, emit immediately — the frontend handles the visual transition
                 let _ = TOOL_DONE_DELAY_MS; // acknowledge constant exists
-                self.emit(AgentStatePayload {
+                self.emit(agent_id, AgentStatePayload {
                     agent_id: agent_id.to_string(),
                     status: "tool_done".to_string(),
                     tool_name: None,
@@ -203,11 +220,12 @@ impl AgentStateManager {
                     tool_status: None,
                     is_subagent: if is_subagent { Some(true) } else { None },
                     parent_tool_id,
+                    agent_type: None,
                 });
             }
 
             AgentEvent::TurnEnd => {
-                let agent = self.ensure_agent(agent_id);
+                let agent = self.ensure_agent(agent_id, None);
                 agent.last_activity = Instant::now();
 
                 // Clear all tools
@@ -221,7 +239,7 @@ impl AgentStateManager {
                 agent.permission_timer_start = None;
                 agent.text_idle_timer_start = None;
 
-                self.emit(AgentStatePayload {
+                self.emit(agent_id, AgentStatePayload {
                     agent_id: agent_id.to_string(),
                     status: "turn_end".to_string(),
                     tool_name: None,
@@ -229,11 +247,12 @@ impl AgentStateManager {
                     tool_status: None,
                     is_subagent: None,
                     parent_tool_id: None,
+                    agent_type: None,
                 });
             }
 
             AgentEvent::Active => {
-                let agent = self.ensure_agent(agent_id);
+                let agent = self.ensure_agent(agent_id, None);
                 agent.last_activity = Instant::now();
                 agent.is_waiting = false;
                 agent.text_idle_timer_start = None;
@@ -241,7 +260,7 @@ impl AgentStateManager {
                 // Clear permission state on new activity
                 if agent.permission_sent {
                     agent.permission_sent = false;
-                    self.emit(AgentStatePayload {
+                    self.emit(agent_id, AgentStatePayload {
                         agent_id: agent_id.to_string(),
                         status: "permission_clear".to_string(),
                         tool_name: None,
@@ -249,10 +268,11 @@ impl AgentStateManager {
                         tool_status: None,
                         is_subagent: None,
                         parent_tool_id: None,
+                        agent_type: None,
                     });
                 }
 
-                self.emit(AgentStatePayload {
+                self.emit(agent_id, AgentStatePayload {
                     agent_id: agent_id.to_string(),
                     status: "active".to_string(),
                     tool_name: None,
@@ -260,11 +280,12 @@ impl AgentStateManager {
                     tool_status: None,
                     is_subagent: None,
                     parent_tool_id: None,
+                    agent_type: None,
                 });
             }
 
             AgentEvent::TextIdle => {
-                let agent = self.ensure_agent(agent_id);
+                let agent = self.ensure_agent(agent_id, None);
                 agent.text_idle_timer_start = Some(Instant::now());
                 // The actual idle emission happens in tick_timers()
             }
@@ -303,6 +324,7 @@ impl AgentStateManager {
                             tool_status: None,
                             is_subagent: None,
                             parent_tool_id: None,
+                            agent_type: None,
                         });
                     }
                 }
@@ -321,13 +343,15 @@ impl AgentStateManager {
                         tool_status: None,
                         is_subagent: None,
                         parent_tool_id: None,
+                        agent_type: None,
                     });
                 }
             }
         }
 
         for payload in emissions {
-            self.emit(payload);
+            let aid = payload.agent_id.clone();
+            self.emit(&aid, payload);
         }
     }
 
@@ -340,6 +364,7 @@ impl AgentStateManager {
 
             if agent.permission_sent {
                 agent.permission_sent = false;
+                let agent_type = agent.agent_type.clone();
                 let _ = self.app_handle.emit(
                     "agent-state-changed",
                     &AgentStatePayload {
@@ -350,6 +375,7 @@ impl AgentStateManager {
                         tool_status: None,
                         is_subagent: None,
                         parent_tool_id: None,
+                        agent_type,
                     },
                 );
             }

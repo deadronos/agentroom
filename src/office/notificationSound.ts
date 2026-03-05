@@ -7,7 +7,7 @@ import {
   NOTIFICATION_VOLUME,
 } from './constants.js'
 
-let soundEnabled = true
+let soundEnabled = false
 let audioCtx: AudioContext | null = null
 
 export function setSoundEnabled(enabled: boolean): void {

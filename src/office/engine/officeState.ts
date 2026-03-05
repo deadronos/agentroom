@@ -33,6 +33,10 @@ export class OfficeState {
   blockedTiles: Set<string>
   furniture: FurnitureInstance[]
   walkableTiles: Array<{ col: number; row: number }>
+  /** Seats near desks — used for active/working agents */
+  workSeats: Set<string> = new Set()
+  /** Seats NOT near desks — used for idle/relaxing agents */
+  idleSeats: Set<string> = new Set()
   characters: Map<number, Character> = new Map()
   selectedAgentId: number | null = null
   cameraFollowId: number | null = null
@@ -51,6 +55,43 @@ export class OfficeState {
     this.blockedTiles = getBlockedTiles(this.layout.furniture)
     this.furniture = layoutToFurnitureInstances(this.layout.furniture)
     this.walkableTiles = getWalkableTiles(this.tileMap, this.blockedTiles)
+    this.classifySeats()
+  }
+
+  /** Classify seats into work (near desks) and idle (not near desks) */
+  private classifySeats(): void {
+    // Build set of all desk tiles
+    const deskTiles = new Set<string>()
+    for (const item of this.layout.furniture) {
+      const entry = getCatalogEntry(item.type)
+      if (!entry || !entry.isDesk) continue
+      for (let dr = 0; dr < entry.footprintH; dr++) {
+        for (let dc = 0; dc < entry.footprintW; dc++) {
+          deskTiles.add(`${item.col + dc},${item.row + dr}`)
+        }
+      }
+    }
+
+    this.workSeats = new Set()
+    this.idleSeats = new Set()
+
+    for (const [uid, seat] of this.seats) {
+      let nearDesk = false
+      // Check 2-tile radius in all directions
+      for (let dr = -2; dr <= 2 && !nearDesk; dr++) {
+        for (let dc = -2; dc <= 2 && !nearDesk; dc++) {
+          if (dc === 0 && dr === 0) continue
+          if (deskTiles.has(`${seat.seatCol + dc},${seat.seatRow + dr}`)) {
+            nearDesk = true
+          }
+        }
+      }
+      if (nearDesk) {
+        this.workSeats.add(uid)
+      } else {
+        this.idleSeats.add(uid)
+      }
+    }
   }
 
   /** Rebuild all derived state from a new layout. Reassigns existing characters.
@@ -62,6 +103,7 @@ export class OfficeState {
     this.blockedTiles = getBlockedTiles(layout.furniture)
     this.rebuildFurnitureInstances()
     this.walkableTiles = getWalkableTiles(this.tileMap, this.blockedTiles)
+    this.classifySeats()
 
     // Shift character positions when grid expands left/up
     if (shift && (shift.col !== 0 || shift.row !== 0)) {
@@ -81,7 +123,7 @@ export class OfficeState {
       seat.assigned = false
     }
 
-    // First pass: try to keep characters at their existing seats
+    // First pass: try to keep characters at their existing work seats
     for (const ch of this.characters.values()) {
       if (ch.seatId && this.seats.has(ch.seatId)) {
         const seat = this.seats.get(ch.seatId)!
@@ -101,10 +143,10 @@ export class OfficeState {
       ch.seatId = null // will be reassigned below
     }
 
-    // Second pass: assign remaining characters to free seats
+    // Second pass: assign remaining characters to free work seats
     for (const ch of this.characters.values()) {
       if (ch.seatId) continue
-      const seatId = this.findFreeSeat()
+      const seatId = this.findFreeWorkSeat() ?? this.findFreeSeat()
       if (seatId) {
         this.seats.get(seatId)!.assigned = true
         ch.seatId = seatId
@@ -114,6 +156,24 @@ export class OfficeState {
         ch.x = seat.seatCol * TILE_SIZE + TILE_SIZE / 2
         ch.y = seat.seatRow * TILE_SIZE + TILE_SIZE / 2
         ch.dir = seat.facingDir
+      }
+    }
+
+    // Third pass: reassign idle seats
+    for (const ch of this.characters.values()) {
+      // Try to keep existing idle seat
+      if (ch.idleSeatId && this.seats.has(ch.idleSeatId)) {
+        const idleSeat = this.seats.get(ch.idleSeatId)!
+        if (!idleSeat.assigned) {
+          idleSeat.assigned = true
+          continue
+        }
+      }
+      ch.idleSeatId = null
+      const idleSeatId = this.findFreeIdleSeat()
+      if (idleSeatId) {
+        this.seats.get(idleSeatId)!.assigned = true
+        ch.idleSeatId = idleSeatId
       }
     }
 
@@ -150,39 +210,81 @@ export class OfficeState {
     return `${seat.seatCol},${seat.seatRow}`
   }
 
-  /** Temporarily unblock a character's own seat, run fn, then re-block */
+  /** Get the blocked-tile key for a character's idle seat, or null */
+  private ownIdleSeatKey(ch: Character): string | null {
+    if (!ch.idleSeatId) return null
+    const seat = this.seats.get(ch.idleSeatId)
+    if (!seat) return null
+    return `${seat.seatCol},${seat.seatRow}`
+  }
+
+  /** Temporarily unblock a character's own work and idle seats, run fn, then re-block */
   private withOwnSeatUnblocked<T>(ch: Character, fn: () => T): T {
     const key = this.ownSeatKey(ch)
+    const idleKey = this.ownIdleSeatKey(ch)
     if (key) this.blockedTiles.delete(key)
+    if (idleKey && idleKey !== key) this.blockedTiles.delete(idleKey)
     const result = fn()
     if (key) this.blockedTiles.add(key)
+    if (idleKey && idleKey !== key) this.blockedTiles.add(idleKey)
     return result
   }
 
   private findFreeSeat(): string | null {
-    for (const [uid, seat] of this.seats) {
-      if (!seat.assigned) return uid
+    return this.findFreeWorkSeat() ?? this.findFreeIdleSeat()
+  }
+
+  /** Find a free work seat (near desk) */
+  private findFreeWorkSeat(): string | null {
+    for (const uid of this.workSeats) {
+      const seat = this.seats.get(uid)
+      if (seat && !seat.assigned) return uid
     }
     return null
   }
 
+  /** Find a free idle seat (relax room) */
+  private findFreeIdleSeat(): string | null {
+    for (const uid of this.idleSeats) {
+      const seat = this.seats.get(uid)
+      if (seat && !seat.assigned) return uid
+    }
+    return null
+  }
+
+  /** Palette ranges per agent type: each type gets dedicated character sprites */
+  private static AGENT_TYPE_PALETTES: Record<string, number[]> = {
+    'claude-code': [0, 1],
+    'codex': [2, 3],
+    'gemini': [4, 5],
+  }
+
   /**
    * Pick a diverse palette for a new agent based on currently active agents.
+   * If agentType is provided, restricts palette to that type's range.
    * First 6 agents each get a unique skin (random order). Beyond 6, skins
    * repeat in balanced rounds with a random hue shift (≥45°).
    */
-  private pickDiversePalette(): { palette: number; hueShift: number } {
-    // Count how many non-sub-agents use each base palette (0-5)
-    const counts = new Array(PALETTE_COUNT).fill(0) as number[]
+  private pickDiversePalette(agentType?: string): { palette: number; hueShift: number } {
+    // Determine allowed palette range
+    const allowedPalettes = (agentType && OfficeState.AGENT_TYPE_PALETTES[agentType])
+      ? OfficeState.AGENT_TYPE_PALETTES[agentType]
+      : Array.from({ length: PALETTE_COUNT }, (_, i) => i)
+
+    // Count how many non-sub-agents use each allowed palette
+    const counts = new Map<number, number>()
+    for (const p of allowedPalettes) counts.set(p, 0)
     for (const ch of this.characters.values()) {
       if (ch.isSubagent) continue
-      counts[ch.palette]++
+      if (counts.has(ch.palette)) {
+        counts.set(ch.palette, (counts.get(ch.palette) || 0) + 1)
+      }
     }
-    const minCount = Math.min(...counts)
+    const minCount = Math.min(...counts.values())
     // Available = palettes at the minimum count (least used)
     const available: number[] = []
-    for (let i = 0; i < PALETTE_COUNT; i++) {
-      if (counts[i] === minCount) available.push(i)
+    for (const [p, c] of counts) {
+      if (c === minCount) available.push(p)
     }
     const palette = available[Math.floor(Math.random() * available.length)]
     // First round (minCount === 0): no hue shift. Subsequent rounds: random ≥45°.
@@ -193,7 +295,7 @@ export class OfficeState {
     return { palette, hueShift }
   }
 
-  addAgent(id: number, preferredPalette?: number, preferredHueShift?: number, preferredSeatId?: string, skipSpawnEffect?: boolean, folderName?: string): void {
+  addAgent(id: number, preferredPalette?: number, preferredHueShift?: number, preferredSeatId?: string, skipSpawnEffect?: boolean, folderName?: string, agentType?: string): void {
     if (this.characters.has(id)) return
 
     let palette: number
@@ -202,12 +304,12 @@ export class OfficeState {
       palette = preferredPalette
       hueShift = preferredHueShift ?? 0
     } else {
-      const pick = this.pickDiversePalette()
+      const pick = this.pickDiversePalette(agentType)
       palette = pick.palette
       hueShift = pick.hueShift
     }
 
-    // Try preferred seat first, then any free seat
+    // Try preferred seat first, then any free work seat, then any free seat
     let seatId: string | null = null
     if (preferredSeatId && this.seats.has(preferredSeatId)) {
       const seat = this.seats.get(preferredSeatId)!
@@ -216,11 +318,31 @@ export class OfficeState {
       }
     }
     if (!seatId) {
-      seatId = this.findFreeSeat()
+      seatId = this.findFreeWorkSeat() ?? this.findFreeSeat()
     }
 
+    // Also assign an idle seat (relax room)
+    let idleSeatId: string | null = this.findFreeIdleSeat()
+
     let ch: Character
-    if (seatId) {
+
+    // Assign idle seat
+    if (idleSeatId) {
+      const idleSeatObj = this.seats.get(idleSeatId)!
+      idleSeatObj.assigned = true
+    }
+
+    // Agents start inactive — spawn at idle seat if available, otherwise work seat
+    const spawnAtIdle = idleSeatId && this.seats.has(idleSeatId)
+    if (spawnAtIdle) {
+      const idleSeatObj = this.seats.get(idleSeatId)!
+      // Still assign a work seat for when they become active
+      if (seatId) {
+        const seat = this.seats.get(seatId)!
+        seat.assigned = true
+      }
+      ch = createCharacter(id, palette, seatId, idleSeatObj, hueShift)
+    } else if (seatId) {
       const seat = this.seats.get(seatId)!
       seat.assigned = true
       ch = createCharacter(id, palette, seatId, seat, hueShift)
@@ -236,8 +358,15 @@ export class OfficeState {
       ch.tileRow = spawn.row
     }
 
+    if (idleSeatId) {
+      ch.idleSeatId = idleSeatId
+    }
+
     if (folderName) {
       ch.folderName = folderName
+    }
+    if (agentType) {
+      ch.agentType = agentType
     }
     if (!skipSpawnEffect) {
       ch.matrixEffect = 'spawn'
@@ -251,10 +380,14 @@ export class OfficeState {
     const ch = this.characters.get(id)
     if (!ch) return
     if (ch.matrixEffect === 'despawn') return // already despawning
-    // Free seat and clear selection immediately
+    // Free both work and idle seats, and clear selection immediately
     if (ch.seatId) {
       const seat = this.seats.get(ch.seatId)
       if (seat) seat.assigned = false
+    }
+    if (ch.idleSeatId) {
+      const idleSeat = this.seats.get(ch.idleSeatId)
+      if (idleSeat) idleSeat.assigned = false
     }
     if (this.selectedAgentId === id) this.selectedAgentId = null
     if (this.cameraFollowId === id) this.cameraFollowId = null
@@ -423,7 +556,7 @@ export class OfficeState {
     return id
   }
 
-  /** Remove a specific sub-agent character and free its seat */
+  /** Remove a specific sub-agent character and free its seats */
   removeSubagent(parentAgentId: number, parentToolId: string): void {
     const key = `${parentAgentId}:${parentToolId}`
     const id = this.subagentIdMap.get(key)
@@ -440,6 +573,10 @@ export class OfficeState {
       if (ch.seatId) {
         const seat = this.seats.get(ch.seatId)
         if (seat) seat.assigned = false
+      }
+      if (ch.idleSeatId) {
+        const idleSeat = this.seats.get(ch.idleSeatId)
+        if (idleSeat) idleSeat.assigned = false
       }
       // Start despawn animation — keep character in map for rendering
       ch.matrixEffect = 'despawn'
@@ -472,6 +609,10 @@ export class OfficeState {
             const seat = this.seats.get(ch.seatId)
             if (seat) seat.assigned = false
           }
+          if (ch.idleSeatId) {
+            const idleSeat = this.seats.get(ch.idleSeatId)
+            if (idleSeat) idleSeat.assigned = false
+          }
           // Start despawn animation
           ch.matrixEffect = 'despawn'
           ch.matrixEffectTimer = 0
@@ -498,6 +639,23 @@ export class OfficeState {
     const ch = this.characters.get(id)
     if (ch) {
       ch.isActive = active
+      if (active && ch.seatId) {
+        // If still in spawn animation or just created, teleport to work seat
+        // instead of walking (avoids "spawn at idle → walk to work" on first event)
+        const seat = this.seats.get(ch.seatId)
+        if (seat && (ch.tileCol !== seat.seatCol || ch.tileRow !== seat.seatRow)) {
+          if (ch.matrixEffect === 'spawn') {
+            // Snap to work seat position immediately
+            ch.tileCol = seat.seatCol
+            ch.tileRow = seat.seatRow
+            ch.x = seat.seatCol * TILE_SIZE + TILE_SIZE / 2
+            ch.y = seat.seatRow * TILE_SIZE + TILE_SIZE / 2
+            ch.dir = seat.facingDir
+            ch.path = []
+            ch.moveProgress = 0
+          }
+        }
+      }
       if (!active) {
         // Sentinel -1: signals turn just ended, skip next seat rest timer.
         // Prevents the WALK handler from setting a 2-4 min rest on arrival.

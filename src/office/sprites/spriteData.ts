@@ -1,14 +1,15 @@
 import type { Direction, SpriteData, FloorColor } from '../types.js'
 import { Direction as Dir } from '../types.js'
 import { adjustSprite } from '../colorize.js'
+import { upscaleSprite } from '../assetLoader.js'
 
 // ── Color Palettes ──────────────────────────────────────────────
 const _ = '' // transparent
 
 // ── Furniture Sprites ───────────────────────────────────────────
 
-/** Square desk: 32x32 pixels (2x2 tiles) — top-down wood surface */
-export const DESK_SQUARE_SPRITE: SpriteData = (() => {
+/** Square desk: 64x64 pixels (2x2 tiles at 32px) — top-down wood surface, 2× upscaled from 32x32 */
+export const DESK_SQUARE_SPRITE: SpriteData = upscaleSprite((() => {
   const W = '#8B6914' // wood edge
   const L = '#A07828' // lighter wood
   const S = '#B8922E' // surface
@@ -51,10 +52,10 @@ export const DESK_SQUARE_SPRITE: SpriteData = (() => {
   rows.push(new Array(32).fill(_))
   rows.push(new Array(32).fill(_))
   return rows
-})()
+})(), 2)
 
-/** Plant in pot: 16x24 */
-export const PLANT_SPRITE: SpriteData = (() => {
+/** Plant in pot: 32x48 (2× upscaled from 16x24) */
+export const PLANT_SPRITE: SpriteData = upscaleSprite((() => {
   const G = '#3D8B37'
   const D = '#2D6B27'
   const T = '#6B4E0A'
@@ -86,10 +87,10 @@ export const PLANT_SPRITE: SpriteData = (() => {
     [_, _, _, _, _, _, R, R, R, _, _, _, _, _, _, _],
     [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
   ]
-})()
+})(), 2)
 
-/** Bookshelf: 16x32 (1 tile wide, 2 tiles tall) */
-export const BOOKSHELF_SPRITE: SpriteData = (() => {
+/** Bookshelf: 32x64 (1 tile wide, 2 tiles tall at 32px) — 2× upscaled from 16x32 */
+export const BOOKSHELF_SPRITE: SpriteData = upscaleSprite((() => {
   const W = '#8B6914'
   const D = '#6B4E0A'
   const R = '#CC4444'
@@ -131,10 +132,10 @@ export const BOOKSHELF_SPRITE: SpriteData = (() => {
     [W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W],
     [_, W, W, W, W, W, W, W, W, W, W, W, W, W, W, _],
   ]
-})()
+})(), 2)
 
-/** Water cooler: 16x24 */
-export const COOLER_SPRITE: SpriteData = (() => {
+/** Water cooler: 32x48 (2× upscaled from 16x24) */
+export const COOLER_SPRITE: SpriteData = upscaleSprite((() => {
   const W = '#CCDDEE'
   const L = '#88BBDD'
   const D = '#999999'
@@ -165,10 +166,10 @@ export const COOLER_SPRITE: SpriteData = (() => {
     [_, _, _, _, D, D, D, D, D, D, D, D, _, _, _, _],
     [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
   ]
-})()
+})(), 2)
 
-/** Whiteboard: 32x16 (2 tiles wide, 1 tile tall) — hangs on wall */
-export const WHITEBOARD_SPRITE: SpriteData = (() => {
+/** Whiteboard: 64x32 (2 tiles wide, 1 tile tall at 32px) — 2× upscaled from 32x16 */
+export const WHITEBOARD_SPRITE: SpriteData = upscaleSprite((() => {
   const F = '#AAAAAA'
   const W = '#EEEEFF'
   const M = '#CC4444'
@@ -191,10 +192,10 @@ export const WHITEBOARD_SPRITE: SpriteData = (() => {
     [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
     [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
   ]
-})()
+})(), 2)
 
-/** Chair: 16x16 — top-down desk chair */
-export const CHAIR_SPRITE: SpriteData = (() => {
+/** Chair: 32x32 (2× upscaled from 16x16) — top-down desk chair */
+export const CHAIR_SPRITE: SpriteData = upscaleSprite((() => {
   const W = '#8B6914'
   const D = '#6B4E0A'
   const B = '#5C3D0A'
@@ -217,10 +218,10 @@ export const CHAIR_SPRITE: SpriteData = (() => {
     [_, _, _, _, _, D, _, _, _, _, D, _, _, _, _, _],
     [_, _, _, _, _, D, _, _, _, _, D, _, _, _, _, _],
   ]
-})()
+})(), 2)
 
-/** PC monitor: 16x16 — top-down monitor on stand */
-export const PC_SPRITE: SpriteData = (() => {
+/** PC monitor: 32x32 (2× upscaled from 16x16) — top-down monitor on stand */
+export const PC_SPRITE: SpriteData = upscaleSprite((() => {
   const F = '#555555'
   const S = '#3A3A5C'
   const B = '#6688CC'
@@ -243,10 +244,10 @@ export const PC_SPRITE: SpriteData = (() => {
     [_, _, _, _, _, D, D, D, D, D, D, _, _, _, _, _],
     [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
   ]
-})()
+})(), 2)
 
-/** Desk lamp: 16x16 — top-down lamp with light cone */
-export const LAMP_SPRITE: SpriteData = (() => {
+/** Desk lamp: 32x32 (2× upscaled from 16x16) — top-down lamp with light cone */
+export const LAMP_SPRITE: SpriteData = upscaleSprite((() => {
   const Y = '#FFDD55'
   const L = '#FFEE88'
   const D = '#888888'
@@ -270,12 +271,181 @@ export const LAMP_SPRITE: SpriteData = (() => {
     [_, _, _, _, _, B, B, B, B, B, B, _, _, _, _, _],
     [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
   ]
-})()
+})(), 2)
+
+// ── Phase 3 Furniture Sprites (at 32px scale) ────────────────────
+
+/** Meeting table: 128×64 (4×2 tiles at 32px) — conference table, 2× upscaled from 64×32 */
+export const MEETING_TABLE_SPRITE: SpriteData = upscaleSprite((() => {
+  const W = '#8B6914' // wood edge
+  const S = '#B8922E' // surface
+  const D = '#6B4E0A' // dark edge
+  const L = '#A07828' // lighter wood
+  const rows: string[][] = []
+  rows.push([_, ...new Array(62).fill(W), _])
+  rows.push([W, D, ...new Array(60).fill(L), D, W])
+  for (let r = 0; r < 4; r++) rows.push([W, W, ...new Array(60).fill(S), W, W])
+  rows.push([W, D, ...new Array(60).fill(L), D, W])
+  for (let r = 0; r < 4; r++) rows.push([W, W, ...new Array(60).fill(S), W, W])
+  rows.push([W, D, ...new Array(60).fill(L), D, W])
+  for (let r = 0; r < 4; r++) rows.push([W, W, ...new Array(60).fill(S), W, W])
+  rows.push([W, D, ...new Array(60).fill(L), D, W])
+  for (let r = 0; r < 4; r++) rows.push([W, W, ...new Array(60).fill(S), W, W])
+  rows.push([W, D, ...new Array(60).fill(W), D, W])
+  rows.push([_, ...new Array(62).fill(W), _])
+  // Legs
+  for (let r = 0; r < 4; r++) {
+    const row = new Array(64).fill(_) as string[]
+    row[1] = D; row[2] = D; row[61] = D; row[62] = D
+    rows.push(row)
+  }
+  while (rows.length < 32) rows.push(new Array(64).fill(_))
+  return rows
+})(), 2)
+
+/** Couch: 64×32 (2×1 tiles at 32px) — lounge seating, 2× upscaled from 32×16 */
+export const COUCH_SPRITE: SpriteData = upscaleSprite((() => {
+  const F = '#8B5E3C' // fabric
+  const D2 = '#6B4423' // dark
+  const C = '#A0704D' // cushion
+  return [
+    [_, _, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, _, _],
+    [_, D2, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, D2, _],
+    [_, D2, F, C, C, C, C, C, C, C, C, C, C, C, C, F, F, C, C, C, C, C, C, C, C, C, C, C, C, F, D2, _],
+    [_, D2, F, C, C, C, C, C, C, C, C, C, C, C, C, F, F, C, C, C, C, C, C, C, C, C, C, C, C, F, D2, _],
+    [_, D2, F, C, C, C, C, C, C, C, C, C, C, C, C, F, F, C, C, C, C, C, C, C, C, C, C, C, C, F, D2, _],
+    [_, D2, F, C, C, C, C, C, C, C, C, C, C, C, C, F, F, C, C, C, C, C, C, C, C, C, C, C, C, F, D2, _],
+    [_, D2, F, C, C, C, C, C, C, C, C, C, C, C, C, F, F, C, C, C, C, C, C, C, C, C, C, C, C, F, D2, _],
+    [_, D2, F, C, C, C, C, C, C, C, C, C, C, C, C, F, F, C, C, C, C, C, C, C, C, C, C, C, C, F, D2, _],
+    [_, D2, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, D2, _],
+    [_, D2, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, D2, _],
+    [_, _, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, _, _],
+    [_, _, _, D2, F, F, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, F, F, D2, _],
+    [_, _, _, D2, F, F, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, F, F, D2, _],
+    [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
+    [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
+    [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
+  ]
+})(), 2)
+
+/** Vending machine: 32×64 (1×2 tiles at 32px) — 2× upscaled from 16×32 */
+export const VENDING_MACHINE_SPRITE: SpriteData = upscaleSprite((() => {
+  const F = '#555566' // frame
+  const G = '#3A3A4C' // glass
+  const L = '#88AACC' // light/display
+  const R = '#CC4444' // red accent
+  const D2 = '#444455' // dark
+  return [
+    [_, F, F, F, F, F, F, F, F, F, F, F, F, F, F, _],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, G, G, G, G, G, G, G, G, G, G, G, G, D2, F],
+    [F, D2, G, L, L, G, L, L, G, L, L, G, L, L, D2, F],
+    [F, D2, G, L, L, G, L, L, G, L, L, G, L, L, D2, F],
+    [F, D2, G, G, G, G, G, G, G, G, G, G, G, G, D2, F],
+    [F, D2, G, L, L, G, L, L, G, L, L, G, L, L, D2, F],
+    [F, D2, G, L, L, G, L, L, G, L, L, G, L, L, D2, F],
+    [F, D2, G, G, G, G, G, G, G, G, G, G, G, G, D2, F],
+    [F, D2, G, L, L, G, L, L, G, L, L, G, L, L, D2, F],
+    [F, D2, G, L, L, G, L, L, G, L, L, G, L, L, D2, F],
+    [F, D2, G, G, G, G, G, G, G, G, G, G, G, G, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, D2, R, R, R, R, R, R, R, R, R, R, D2, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F],
+    [F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F],
+    [_, F, F, _, _, _, _, _, _, _, _, _, _, F, F, _],
+  ]
+})(), 2)
+
+/** Monitor: 32×32 (1×1 tile at 32px) — computer screen, 2× upscaled from 16×16 */
+export const MONITOR_SPRITE: SpriteData = upscaleSprite((() => {
+  const F = '#555555'
+  const S = '#3A3A5C'
+  const B2 = '#88AADD'
+  const D2 = '#444444'
+  return [
+    [_, _, _, F, F, F, F, F, F, F, F, F, F, _, _, _],
+    [_, _, _, F, S, S, S, S, S, S, S, S, F, _, _, _],
+    [_, _, _, F, S, B2, B2, B2, B2, B2, B2, S, F, _, _, _],
+    [_, _, _, F, S, B2, B2, B2, B2, B2, B2, S, F, _, _, _],
+    [_, _, _, F, S, B2, B2, B2, B2, B2, B2, S, F, _, _, _],
+    [_, _, _, F, S, B2, B2, B2, B2, B2, B2, S, F, _, _, _],
+    [_, _, _, F, S, B2, B2, B2, B2, B2, B2, S, F, _, _, _],
+    [_, _, _, F, S, B2, B2, B2, B2, B2, B2, S, F, _, _, _],
+    [_, _, _, F, S, S, S, S, S, S, S, S, F, _, _, _],
+    [_, _, _, F, F, F, F, F, F, F, F, F, F, _, _, _],
+    [_, _, _, _, _, _, _, D2, D2, _, _, _, _, _, _, _],
+    [_, _, _, _, _, _, _, D2, D2, _, _, _, _, _, _, _],
+    [_, _, _, _, _, _, D2, D2, D2, D2, _, _, _, _, _, _],
+    [_, _, _, _, _, D2, D2, D2, D2, D2, D2, _, _, _, _, _],
+    [_, _, _, _, _, D2, D2, D2, D2, D2, D2, _, _, _, _, _],
+    [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
+  ]
+})(), 2)
+
+/** Arcade cabinet: 32×64 (1×2 tiles at 32px) — 2× upscaled from 16×32 */
+export const ARCADE_SPRITE: SpriteData = upscaleSprite((() => {
+  const F = '#333344' // frame
+  const S = '#222233' // screen surround
+  const G = '#44AA66' // green screen
+  const B2 = '#225533' // dark green
+  const Y = '#CCAA33' // yellow accent
+  const R = '#CC4444' // red
+  const D2 = '#444455' // dark
+  return [
+    [_, _, _, F, F, F, F, F, F, F, F, F, F, _, _, _],
+    [_, _, F, F, F, F, F, F, F, F, F, F, F, F, _, _],
+    [_, _, F, S, S, S, S, S, S, S, S, S, S, F, _, _],
+    [_, _, F, S, G, G, G, G, G, G, G, G, S, F, _, _],
+    [_, _, F, S, G, B2, G, G, G, G, B2, G, S, F, _, _],
+    [_, _, F, S, G, G, G, B2, B2, G, G, G, S, F, _, _],
+    [_, _, F, S, G, G, G, G, G, G, G, G, S, F, _, _],
+    [_, _, F, S, G, B2, G, G, G, G, B2, G, S, F, _, _],
+    [_, _, F, S, G, G, B2, B2, B2, B2, G, G, S, F, _, _],
+    [_, _, F, S, G, G, G, G, G, G, G, G, S, F, _, _],
+    [_, _, F, S, S, S, S, S, S, S, S, S, S, F, _, _],
+    [_, _, F, F, F, F, F, F, F, F, F, F, F, F, _, _],
+    [_, _, F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F, _, _],
+    [_, _, F, D2, Y, Y, D2, D2, D2, D2, R, R, D2, F, _, _],
+    [_, _, F, D2, Y, Y, D2, D2, D2, D2, R, R, D2, F, _, _],
+    [_, _, F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F, _, _],
+    [_, _, F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F, _, _],
+    [_, _, F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F, _, _],
+    [_, _, F, F, F, F, F, F, F, F, F, F, F, F, _, _],
+    [_, _, F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F, _, _],
+    [_, _, F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F, _, _],
+    [_, _, F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F, _, _],
+    [_, _, F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F, _, _],
+    [_, _, F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F, _, _],
+    [_, _, F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F, _, _],
+    [_, _, F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F, _, _],
+    [_, _, F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F, _, _],
+    [_, _, F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F, _, _],
+    [_, _, F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F, _, _],
+    [_, _, F, D2, D2, D2, D2, D2, D2, D2, D2, D2, D2, F, _, _],
+    [_, _, F, F, F, F, F, F, F, F, F, F, F, F, _, _],
+    [_, _, _, F, F, _, _, _, _, _, _, F, F, _, _, _],
+  ]
+})(), 2)
 
 // ── Speech Bubble Sprites ───────────────────────────────────────
 
-/** Permission bubble: white square with "..." in amber, and a tail pointer (11x13) */
-export const BUBBLE_PERMISSION_SPRITE: SpriteData = (() => {
+/** Permission bubble: 22x26 (2× upscaled from 11x13) — white square with "..." in amber */
+export const BUBBLE_PERMISSION_SPRITE: SpriteData = upscaleSprite((() => {
   const B = '#555566' // border
   const F = '#EEEEFF' // fill
   const A = '#CCA700' // amber dots
@@ -294,10 +464,10 @@ export const BUBBLE_PERMISSION_SPRITE: SpriteData = (() => {
     [_, _, _, _, _, B, _, _, _, _, _],
     [_, _, _, _, _, _, _, _, _, _, _],
   ]
-})()
+})(), 2)
 
-/** Waiting bubble: white square with green checkmark, and a tail pointer (11x13) */
-export const BUBBLE_WAITING_SPRITE: SpriteData = (() => {
+/** Waiting bubble: 22x26 (2× upscaled from 11x13) — white square with green checkmark */
+export const BUBBLE_WAITING_SPRITE: SpriteData = upscaleSprite((() => {
   const B = '#555566' // border
   const F = '#EEEEFF' // fill
   const G = '#44BB66' // green check
@@ -316,10 +486,10 @@ export const BUBBLE_WAITING_SPRITE: SpriteData = (() => {
     [_, _, _, _, _, B, _, _, _, _, _],
     [_, _, _, _, _, _, _, _, _, _, _],
   ]
-})()
+})(), 2)
 
 // ── Character Sprites ───────────────────────────────────────────
-// 16x24 characters with palette substitution
+// 32x48 characters (2× upscaled from 16x24) with palette substitution
 
 /** Palette colors for 6 distinct agent characters */
 export const CHARACTER_PALETTES = [
@@ -349,9 +519,9 @@ const E = '#FFFFFF' // eyes
 
 type TemplateCell = typeof H | typeof K | typeof S | typeof P | typeof O | typeof E | typeof _
 
-/** Resolve a template to SpriteData using a palette */
+/** Resolve a template to SpriteData using a palette, then 2× upscale to 32×48 */
 function resolveTemplate(template: TemplateCell[][], palette: CharPalette): SpriteData {
-  return template.map((row) =>
+  const raw = template.map((row) =>
     row.map((cell) => {
       if (cell === _) return ''
       if (cell === E) return E
@@ -363,6 +533,7 @@ function resolveTemplate(template: TemplateCell[][], palette: CharPalette): Spri
       return cell
     }),
   )
+  return upscaleSprite(raw, 2)
 }
 
 /** Flip a template horizontally (for generating left sprites from right) */

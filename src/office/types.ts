@@ -91,6 +91,12 @@ export const FurnitureType = {
   CHAIR: 'chair',
   PC: 'pc',
   LAMP: 'lamp',
+  // Phase 3 additions
+  MEETING_TABLE: 'meeting_table',
+  COUCH: 'couch',
+  VENDING_MACHINE: 'vending_machine',
+  MONITOR: 'monitor',
+  ARCADE: 'arcade',
 } as const
 export type FurnitureType = (typeof FurnitureType)[keyof typeof FurnitureType]
 
@@ -140,6 +146,8 @@ export interface OfficeLayout {
   furniture: PlacedFurniture[]
   /** Per-tile color settings, parallel to tiles array. null = wall/no color */
   tileColors?: Array<FloorColor | null>
+  /** Flat array of tileset GIDs for background rendering (parallel to tiles[]). 0 = no tileset tile. */
+  backgroundGids?: number[]
 }
 
 export interface Character {
@@ -175,8 +183,10 @@ export interface Character {
   wanderLimit: number
   /** Whether the agent is actively working */
   isActive: boolean
-  /** Assigned seat uid, or null if no seat */
+  /** Assigned work seat uid, or null if no seat */
   seatId: string | null
+  /** Assigned idle/relax seat uid, or null if no idle seat */
+  idleSeatId: string | null
   /** Active speech bubble type, or null if none showing */
   bubbleType: 'permission' | 'waiting' | null
   /** Countdown timer for bubble (waiting: 2→0, permission: unused) */
@@ -195,4 +205,6 @@ export interface Character {
   matrixEffectSeeds: number[]
   /** Workspace folder name (only set for multi-root workspaces) */
   folderName?: string
+  /** Agent type: 'claude-code' | 'codex' | 'gemini' */
+  agentType?: string
 }

@@ -1223,7 +1223,7 @@ pub async fn start_watching(app: tauri::AppHandle, project_dir: String) -> Resul
 
 #[tauri::command]
 pub async fn stop_watching() -> Result<String, String> {
-    // TODO: store watcher handle globally and stop it here
+    crate::file_watcher::stop_watching_inner();
     Ok(r#"{"status":"stopped"}"#.to_string())
 }
 
@@ -1250,4 +1250,15 @@ pub async fn load_visual_layout(project_id: String) -> Result<String, String> {
         .join("layouts")
         .join(format!("{}.json", project_id));
     fs::read_to_string(path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn read_codexbar_snapshot() -> Result<String, String> {
+    let home = env::var("HOME").map_err(|_| "HOME not set".to_string())?;
+    let path = PathBuf::from(&home)
+        .join("Library")
+        .join("Group Containers")
+        .join("group.com.steipete.codexbar")
+        .join("widget-snapshot.json");
+    fs::read_to_string(path).map_err(|e| format!("CodexBar++ snapshot not available: {}", e))
 }

@@ -31,6 +31,14 @@ pub enum AgentEvent {
 const BASH_COMMAND_DISPLAY_MAX_LENGTH: usize = 30;
 const TASK_DESCRIPTION_DISPLAY_MAX_LENGTH: usize = 40;
 
+/// Truncate a string to at most `max_chars` characters (UTF-8 safe).
+fn truncate_chars(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        Some((idx, _)) => &s[..idx],
+        None => s,
+    }
+}
+
 /// Format a tool invocation into a human-readable status string.
 fn format_tool_status(tool_name: &str, input: &Value) -> String {
     let basename = |v: &Value| -> String {
@@ -50,8 +58,8 @@ fn format_tool_status(tool_name: &str, input: &Value) -> String {
         "Write" => format!("Writing {}", basename(&input["file_path"])),
         "Bash" => {
             let cmd = input["command"].as_str().unwrap_or("");
-            if cmd.len() > BASH_COMMAND_DISPLAY_MAX_LENGTH {
-                format!("Running: {}\u{2026}", &cmd[..BASH_COMMAND_DISPLAY_MAX_LENGTH])
+            if cmd.chars().count() > BASH_COMMAND_DISPLAY_MAX_LENGTH {
+                format!("Running: {}\u{2026}", truncate_chars(cmd, BASH_COMMAND_DISPLAY_MAX_LENGTH))
             } else {
                 format!("Running: {}", cmd)
             }
@@ -64,10 +72,10 @@ fn format_tool_status(tool_name: &str, input: &Value) -> String {
             let desc = input["description"].as_str().unwrap_or("");
             if desc.is_empty() {
                 "Running subtask".to_string()
-            } else if desc.len() > TASK_DESCRIPTION_DISPLAY_MAX_LENGTH {
+            } else if desc.chars().count() > TASK_DESCRIPTION_DISPLAY_MAX_LENGTH {
                 format!(
                     "Subtask: {}\u{2026}",
-                    &desc[..TASK_DESCRIPTION_DISPLAY_MAX_LENGTH]
+                    truncate_chars(desc, TASK_DESCRIPTION_DISPLAY_MAX_LENGTH)
                 )
             } else {
                 format!("Subtask: {}", desc)

@@ -10,7 +10,7 @@ import type { SpriteData, FloorColor } from './types.js'
 import { getColorizedSprite, clearColorizeCache } from './colorize.js'
 import { TILE_SIZE, FALLBACK_FLOOR_COLOR } from './constants.js'
 
-/** Default solid gray 16×16 tile used when floors.png is not loaded */
+/** Default solid gray 32×32 tile used when floors.png is not loaded */
 const DEFAULT_FLOOR_SPRITE: SpriteData = Array.from(
   { length: TILE_SIZE },
   () => Array(TILE_SIZE).fill(FALLBACK_FLOOR_COLOR) as string[],
@@ -64,8 +64,8 @@ export function getColorizedFloorSprite(patternIndex: number, color: FloorColor)
 
   const base = getFloorSprite(patternIndex)
   if (!base) {
-    // Return a 16x16 magenta error tile
-    const err: SpriteData = Array.from({ length: 16 }, () => Array(16).fill('#FF00FF'))
+    // Return a 32x32 magenta error tile
+    const err: SpriteData = Array.from({ length: TILE_SIZE }, () => Array(TILE_SIZE).fill('#FF00FF'))
     return err
   }
 

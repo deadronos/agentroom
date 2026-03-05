@@ -41,13 +41,28 @@ function parseCassHit(hit: Record<string, unknown>): Session {
   };
 }
 
+function extractWorkspaceFromSourcePath(sourcePath: string): string | null {
+  // Claude Code: ~/.claude/projects/{encoded-workspace}/{sessionId}.jsonl
+  const claudeMatch = sourcePath.match(/\.claude\/projects\/([^/]+)\//);
+  if (claudeMatch) {
+    let decoded = claudeMatch[1];
+    if (decoded.startsWith("-")) decoded = decoded.slice(1);
+    return "/" + decoded.replace(/-/g, "/");
+  }
+  // Codex: ~/.codex/ patterns
+  if (sourcePath.includes("/.codex/")) return null;
+  // Gemini: hash-based paths
+  if (sourcePath.includes("/.gemini/")) return null;
+  return null;
+}
+
 function parseTimelineSession(s: Record<string, unknown>): Session {
   const sourcePath = (s.source_path as string) || "";
   return {
     id: sourcePath,
     agent: normalizeAgent((s.agent as string) || "unknown"),
     isSubagent: detectSubagent(s, sourcePath),
-    workspace: null,
+    workspace: (s.workspace as string) || extractWorkspaceFromSourcePath(sourcePath),
     title: (s.title as string) || null,
     sourcePath,
     startedAt: (s.started_at as number) || null,

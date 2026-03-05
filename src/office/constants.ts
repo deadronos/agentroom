@@ -1,16 +1,18 @@
 import type { FloorColor } from './types.js'
 
 // ── Grid & Layout ────────────────────────────────────────────
-export const TILE_SIZE = 16
-export const DEFAULT_COLS = 20
-export const DEFAULT_ROWS = 11
+export const TILE_SIZE = 32
+export const DEFAULT_COLS = 30
+export const DEFAULT_ROWS = 22
 export const MAX_COLS = 64
 export const MAX_ROWS = 64
 
 // ── Character Animation ─────────────────────────────────────
-export const WALK_SPEED_PX_PER_SEC = 48
+export const WALK_SPEED_PX_PER_SEC = 96
 export const WALK_FRAME_DURATION_SEC = 0.15
 export const TYPE_FRAME_DURATION_SEC = 0.3
+// Wander constants (deprecated — idle room replaces wandering behavior)
+// Kept for backward compat with Character interface fields
 export const WANDER_PAUSE_MIN_SEC = 2.0
 export const WANDER_PAUSE_MAX_SEC = 20.0
 export const WANDER_MOVES_BEFORE_REST_MIN = 3
@@ -21,8 +23,8 @@ export const SEAT_REST_MAX_SEC = 240.0
 // ── Matrix Effect ────────────────────────────────────────────
 export const MATRIX_EFFECT_DURATION_SEC = 0.3
 export const MATRIX_TRAIL_LENGTH = 6
-export const MATRIX_SPRITE_COLS = 16
-export const MATRIX_SPRITE_ROWS = 24
+export const MATRIX_SPRITE_COLS = 32
+export const MATRIX_SPRITE_ROWS = 48
 export const MATRIX_FLICKER_FPS = 30
 export const MATRIX_FLICKER_VISIBILITY_THRESHOLD = 180
 export const MATRIX_COLUMN_STAGGER_RANGE = 0.3
@@ -33,7 +35,7 @@ export const MATRIX_TRAIL_MID_THRESHOLD = 0.33
 export const MATRIX_TRAIL_DIM_THRESHOLD = 0.66
 
 // ── Rendering ────────────────────────────────────────────────
-export const CHARACTER_SITTING_OFFSET_PX = 6
+export const CHARACTER_SITTING_OFFSET_PX = 12
 export const CHARACTER_Z_SORT_OFFSET = 0.5
 export const OUTLINE_Z_SORT_OFFSET = 0.001
 export const SELECTED_OUTLINE_ALPHA = 1.0
@@ -47,8 +49,8 @@ export const BUTTON_ICON_SIZE_FACTOR = 0.45
 export const BUTTON_LINE_WIDTH_MIN = 1.5
 export const BUTTON_LINE_WIDTH_ZOOM_FACTOR = 0.5
 export const BUBBLE_FADE_DURATION_SEC = 0.5
-export const BUBBLE_SITTING_OFFSET_PX = 10
-export const BUBBLE_VERTICAL_OFFSET_PX = 24
+export const BUBBLE_SITTING_OFFSET_PX = 20
+export const BUBBLE_VERTICAL_OFFSET_PX = 48
 export const FALLBACK_FLOOR_COLOR = '#808080'
 
 // ── Rendering - Overlay Colors (canvas, not CSS) ─────────────
@@ -74,7 +76,7 @@ export const CAMERA_FOLLOW_SNAP_THRESHOLD = 0.5
 // ── Zoom ─────────────────────────────────────────────────────
 export const ZOOM_MIN = 1
 export const ZOOM_MAX = 10
-export const ZOOM_DEFAULT_DPR_FACTOR = 2
+export const ZOOM_DEFAULT_DPR_FACTOR = 1
 export const ZOOM_LEVEL_FADE_DELAY_MS = 1500
 export const ZOOM_LEVEL_HIDE_DELAY_MS = 2000
 export const ZOOM_LEVEL_FADE_DURATION_SEC = 0.5
@@ -107,7 +109,7 @@ export const HUE_SHIFT_MIN_DEG = 45
 export const HUE_SHIFT_RANGE_DEG = 271
 export const AUTO_ON_FACING_DEPTH = 3
 export const AUTO_ON_SIDE_DEPTH = 2
-export const CHARACTER_HIT_HALF_WIDTH = 8
-export const CHARACTER_HIT_HEIGHT = 24
-export const TOOL_OVERLAY_VERTICAL_OFFSET = 32
+export const CHARACTER_HIT_HALF_WIDTH = 16
+export const CHARACTER_HIT_HEIGHT = 48
+export const TOOL_OVERLAY_VERTICAL_OFFSET = 64
 export const PULSE_ANIMATION_DURATION_SEC = 1.5

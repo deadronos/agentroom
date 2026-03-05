@@ -1,5 +1,6 @@
 import { TileType, TILE_SIZE, CharacterState } from '../types.js'
 import type { TileType as TileTypeVal, FurnitureInstance, Character, SpriteData, Seat, FloorColor } from '../types.js'
+import { tilesetManager } from '../tilesets/tilesetManager.js'
 import { getCachedSprite, getOutlineSprite } from '../sprites/spriteCache.js'
 import { getCharacterSprites, BUBBLE_PERMISSION_SPRITE, BUBBLE_WAITING_SPRITE } from '../sprites/spriteData.js'
 import { getCharacterSprite } from './characters.js'
@@ -40,7 +41,95 @@ import {
   ROTATE_BUTTON_BG,
 } from '../constants.js'
 
+// ── Room label definitions ──────────────────────────────────────
+interface RoomLabel {
+  name: string
+  /** Center tile column */
+  cx: number
+  /** Center tile row */
+  cy: number
+}
+
+const ROOM_LABELS: RoomLabel[] = [
+  { name: 'Working',  cx: 6.5,  cy: 1.1 },
+  { name: 'Idling',   cx: 22,   cy: 1.1 },
+]
+
+const ROOM_LABEL_FONT_BASE = 11     // base font size at zoom=1
+const ROOM_LABEL_COLOR = '#000000'
+
 // ── Render functions ────────────────────────────────────────────
+
+/** Render room name labels with background banners */
+export function renderRoomLabels(
+  ctx: CanvasRenderingContext2D,
+  offsetX: number,
+  offsetY: number,
+  zoom: number,
+): void {
+  const s = TILE_SIZE * zoom
+  const fontSize = Math.max(8, Math.round(ROOM_LABEL_FONT_BASE * zoom))
+  ctx.save()
+  ctx.font = `900 ${fontSize}px "SF Pro Display", "Segoe UI", system-ui, sans-serif`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  const padX = fontSize * 0.6
+  const padY = fontSize * 0.35
+  for (const label of ROOM_LABELS) {
+    const x = offsetX + label.cx * s
+    const y = offsetY + label.cy * s
+    const text = label.name.toUpperCase()
+    const metrics = ctx.measureText(text)
+    const tw = metrics.width
+    const th = fontSize
+    // Background pill
+    ctx.globalAlpha = 0.55
+    ctx.fillStyle = '#1a1a2e'
+    const rx = x - tw / 2 - padX
+    const ry = y - th / 2 - padY
+    const rw = tw + padX * 2
+    const rh = th + padY * 2
+    const radius = rh / 2
+    ctx.beginPath()
+    ctx.moveTo(rx + radius, ry)
+    ctx.lineTo(rx + rw - radius, ry)
+    ctx.arcTo(rx + rw, ry, rx + rw, ry + radius, radius)
+    ctx.arcTo(rx + rw, ry + rh, rx + rw - radius, ry + rh, radius)
+    ctx.lineTo(rx + radius, ry + rh)
+    ctx.arcTo(rx, ry + rh, rx, ry + rh - radius, radius)
+    ctx.arcTo(rx, ry, rx + radius, ry, radius)
+    ctx.closePath()
+    ctx.fill()
+    // Text
+    ctx.globalAlpha = 0.9
+    ctx.fillStyle = ROOM_LABEL_COLOR
+    ctx.fillText(text, x, y)
+  }
+  ctx.restore()
+}
+
+/** Render tileset-based background tiles using GID map */
+export function renderBackground(
+  ctx: CanvasRenderingContext2D,
+  backgroundGids: number[],
+  cols: number,
+  rows: number,
+  offsetX: number,
+  offsetY: number,
+  zoom: number,
+): void {
+  if (!tilesetManager.loaded) return
+  ctx.imageSmoothingEnabled = false
+  const s = TILE_SIZE * zoom
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const gid = backgroundGids[r * cols + c]
+      if (gid > 0) {
+        tilesetManager.drawTile(ctx, gid, offsetX + c * s, offsetY + r * s, zoom)
+      }
+    }
+  }
+}
 
 export function renderTileGrid(
   ctx: CanvasRenderingContext2D,
@@ -50,6 +139,7 @@ export function renderTileGrid(
   zoom: number,
   tileColors?: Array<FloorColor | null>,
   cols?: number,
+  backgroundGids?: number[],
 ): void {
   const s = TILE_SIZE * zoom
   const useSpriteFloors = hasFloorSprites()
@@ -64,6 +154,12 @@ export function renderTileGrid(
 
       // Skip VOID tiles entirely (transparent)
       if (tile === TileType.VOID) continue
+
+      // Skip tiles that have a tileset background (already rendered by renderBackground)
+      if (backgroundGids) {
+        const bgIdx = r * layoutCols + c
+        if (backgroundGids[bgIdx] > 0) continue
+      }
 
       if (tile === TileType.WALL || !useSpriteFloors) {
         // Wall tiles or fallback: solid color
@@ -541,6 +637,7 @@ export function renderFrame(
   tileColors?: Array<FloorColor | null>,
   layoutCols?: number,
   layoutRows?: number,
+  backgroundGids?: number[],
 ): { offsetX: number; offsetY: number } {
   // Clear
   ctx.clearRect(0, 0, canvasWidth, canvasHeight)
@@ -555,8 +652,13 @@ export function renderFrame(
   const offsetX = Math.floor((canvasWidth - mapW) / 2) + Math.round(panX)
   const offsetY = Math.floor((canvasHeight - mapH) / 2) + Math.round(panY)
 
-  // Draw tiles (floor + wall base color)
-  renderTileGrid(ctx, tileMap, offsetX, offsetY, zoom, tileColors, layoutCols)
+  // Draw tileset background (if available)
+  if (backgroundGids && backgroundGids.length > 0) {
+    renderBackground(ctx, backgroundGids, cols, rows, offsetX, offsetY, zoom)
+  }
+
+  // Draw tiles (floor + wall base color) — fallback for tiles without background GIDs
+  renderTileGrid(ctx, tileMap, offsetX, offsetY, zoom, tileColors, layoutCols, backgroundGids)
 
   // Seat indicators (below furniture/characters, on top of floor)
   if (selection) {
@@ -578,6 +680,9 @@ export function renderFrame(
 
   // Speech bubbles (always on top of characters)
   renderBubbles(ctx, characters, offsetX, offsetY, zoom)
+
+  // Room name labels (rendered on top of everything)
+  renderRoomLabels(ctx, offsetX, offsetY, zoom)
 
   // Editor overlays
   if (editor) {

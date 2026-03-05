@@ -21,11 +21,17 @@ export interface AgentEventState {
   agentTools: Record<number, ToolActivity[]>
   agentStatuses: Record<number, string>
   subagentCharacters: SubagentCharacter[]
+  /** Remove all agents from office state and reset ID maps */
+  clearAll: () => void
+  /** Reverse lookup: numeric character ID → original agent_id string (file stem / UUID) */
+  getAgentStringId: (numId: number) => string | null
 }
 
 // Map string agent_id (session UUID) to numeric ID for the game engine
 let nextAgentNumericId = 1
 const agentIdMap = new Map<string, number>()
+// Map string agent_id to agent type (claude-code, codex, gemini)
+const agentTypeMap = new Map<string, string>()
 
 function getOrCreateNumericId(agentId: string): number {
   let numId = agentIdMap.get(agentId)
@@ -34,6 +40,13 @@ function getOrCreateNumericId(agentId: string): number {
     agentIdMap.set(agentId, numId)
   }
   return numId
+}
+
+/** Reset all module-level ID maps. Call when switching watched project. */
+export function resetAgentIdMaps(): void {
+  agentIdMap.clear()
+  agentTypeMap.clear()
+  nextAgentNumericId = 1
 }
 
 export function useAgentEvents(
@@ -47,10 +60,56 @@ export function useAgentEvents(
   // Track active tool counts per agent for tool_done logic
   const activeToolCountRef = useRef<Map<number, Set<string>>>(new Map())
 
-  const ensureAgent = useCallback((numId: number) => {
+  // Initial scan flag: during the first ~2s, all agents are created idle.
+  // Only real-time events after the initial scan activate agents.
+  const initializingRef = useRef(true)
+  useEffect(() => {
+    const timer = setTimeout(() => { initializingRef.current = false }, 2000)
+    return () => clearTimeout(timer)
+  }, [])
+
+  /** Reverse lookup: numeric ID → original agent_id string */
+  const getAgentStringId = useCallback((numId: number): string | null => {
+    for (const [strId, nId] of agentIdMap) {
+      if (nId === numId) return strId
+    }
+    return null
+  }, [])
+
+  /** Remove all agents from office state and reset ID maps */
+  const clearAll = useCallback(() => {
+    const os = getOfficeState()
+    // Remove all characters
+    for (const id of Array.from(os.characters.keys())) {
+      const ch = os.characters.get(id)
+      if (ch?.seatId) {
+        const seat = os.seats.get(ch.seatId)
+        if (seat) seat.assigned = false
+      }
+      if (ch?.idleSeatId) {
+        const idleSeat = os.seats.get(ch.idleSeatId)
+        if (idleSeat) idleSeat.assigned = false
+      }
+      os.characters.delete(id)
+    }
+    os.subagentIdMap.clear()
+    os.subagentMeta.clear()
+    os.selectedAgentId = null
+    os.cameraFollowId = null
+    // Reset module-level ID maps
+    resetAgentIdMaps()
+    activeToolCountRef.current.clear()
+    // Reset React state
+    setAgents([])
+    setAgentTools({})
+    setAgentStatuses({})
+    setSubagentCharacters([])
+  }, [getOfficeState])
+
+  const ensureAgent = useCallback((numId: number, agentType?: string) => {
     const os = getOfficeState()
     if (!os.characters.has(numId)) {
-      os.addAgent(numId)
+      os.addAgent(numId, undefined, undefined, undefined, undefined, undefined, agentType)
       setAgents((prev) => prev.includes(numId) ? prev : [...prev, numId])
     }
   }, [getOfficeState])
@@ -60,9 +119,22 @@ export function useAgentEvents(
       const os = getOfficeState()
       const numId = getOrCreateNumericId(event.agent_id)
 
+      // Track agent type from first event that carries it
+      if (event.agent_type && !agentTypeMap.has(event.agent_id)) {
+        agentTypeMap.set(event.agent_id, event.agent_type)
+      }
+      const agentType = agentTypeMap.get(event.agent_id)
+
+      // During initial scan (~first 2s), only create agents as idle.
+      // Skip activation, sounds, and bubbles — treat all sessions as idle.
+      if (initializingRef.current) {
+        ensureAgent(numId, agentType)
+        return
+      }
+
       switch (event.status) {
         case 'tool_start': {
-          ensureAgent(numId)
+          ensureAgent(numId, agentType)
           const toolId = event.tool_id || ''
           const status = event.tool_status || `Using ${event.tool_name || 'tool'}`
 
@@ -137,7 +209,7 @@ export function useAgentEvents(
         }
 
         case 'turn_end': {
-          ensureAgent(numId)
+          ensureAgent(numId, agentType)
 
           // Clear all tools
           activeToolCountRef.current.delete(numId)
@@ -163,7 +235,7 @@ export function useAgentEvents(
         }
 
         case 'waiting': {
-          ensureAgent(numId)
+          ensureAgent(numId, agentType)
           os.setAgentActive(numId, false)
           os.showWaitingBubble(numId)
           setAgentStatuses((prev) => ({ ...prev, [numId]: 'waiting' }))
@@ -172,7 +244,7 @@ export function useAgentEvents(
         }
 
         case 'active': {
-          ensureAgent(numId)
+          ensureAgent(numId, agentType)
           os.setAgentActive(numId, true)
           setAgentStatuses((prev) => {
             if (!(numId in prev)) return prev
@@ -184,7 +256,7 @@ export function useAgentEvents(
         }
 
         case 'permission': {
-          ensureAgent(numId)
+          ensureAgent(numId, agentType)
           os.showPermissionBubble(numId)
           setAgentTools((prev) => {
             const list = prev[numId]
@@ -219,7 +291,7 @@ export function useAgentEvents(
         }
 
         case 'text_idle': {
-          ensureAgent(numId)
+          ensureAgent(numId, agentType)
           os.setAgentActive(numId, false)
           os.showWaitingBubble(numId)
           setAgentStatuses((prev) => ({ ...prev, [numId]: 'waiting' }))
@@ -234,5 +306,5 @@ export function useAgentEvents(
     }
   }, [getOfficeState, ensureAgent])
 
-  return { agents, agentTools, agentStatuses, subagentCharacters }
+  return { agents, agentTools, agentStatuses, subagentCharacters, clearAll, getAgentStringId }
 }
