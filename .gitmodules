@@ -1,0 +1,18 @@
+[submodule "search-backend/asupersync"]
+	path = search-backend/asupersync
+	url = https://github.com/liuyixin-louis/asupersync.git
+[submodule "search-backend/toon_rust"]
+	path = search-backend/toon_rust
+	url = https://github.com/liuyixin-louis/toon_rust.git
+[submodule "search-backend/frankentui"]
+	path = search-backend/frankentui
+	url = https://github.com/liuyixin-louis/frankentui.git
+[submodule "search-backend/frankensearch"]
+	path = search-backend/frankensearch
+	url = https://github.com/liuyixin-louis/frankensearch.git
+[submodule "search-backend/franken_agent_detection"]
+	path = search-backend/franken_agent_detection
+	url = https://github.com/liuyixin-louis/franken_agent_detection.git
+[submodule "search-backend/cass"]
+	path = search-backend/cass
+	url = https://github.com/liuyixin-louis/cass.git

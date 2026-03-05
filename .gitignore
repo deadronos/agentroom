@@ -6,7 +6,7 @@ npm-debug.log*
 
 # Rust / Tauri
 src-tauri/target/
-search-backend/cass/target/
+search-backend/*/target/
 
 
 # OS / editors
