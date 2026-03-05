@@ -39,6 +39,7 @@ npm run tauri dev
 - **Token usage dashboard** — real-time spend and rate limit tracking
 - **AI-powered session tagging** — auto-summarize and categorize sessions
 - **Persistent layouts** — office design is saved per project
+- **Claude Code skill** — drop-in [`searching-agent-sessions`](skills/searching-agent-sessions/) skill lets you search past sessions from any Claude Code conversation (just copy to `~/.claude/skills/`)
 
 ## How It Works
 
@@ -255,6 +256,22 @@ cass search "query" --json --limit 20 --highlight
 cass export "/path/to/session.jsonl" --format markdown
 ```
 
+### Claude Code Skill (standalone)
+
+The repo includes a ready-to-use Claude Code skill that lets you search sessions from any Claude Code conversation — no desktop app needed.
+
+```bash
+# Install the skill (one-time)
+cp -r skills/searching-agent-sessions ~/.claude/skills/
+
+# Then in any Claude Code session, just ask:
+#   "find my session about authentication"
+#   "what did I discuss with gemini about rate limiting?"
+#   "show recent codex sessions"
+```
+
+The skill handles cross-agent search, workspace resolution, subagent deduplication, and outputs ready-to-paste resume commands. See [`skills/searching-agent-sessions/README.md`](skills/searching-agent-sessions/README.md) for details.
+
 ---
 
 ## Project Structure
@@ -287,6 +304,8 @@ agentroom-visual/
 |-- scripts/
 |   |-- build-cass.sh           # Build CASS from source
 |   +-- install-cass.sh         # Full install (build + PATH setup)
+|-- skills/
+|   +-- searching-agent-sessions/  # Claude Code skill (copy to ~/.claude/skills/)
 +-- public/assets/              # Tilesets, character sprites
 ```
 
