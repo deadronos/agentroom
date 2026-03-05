@@ -177,7 +177,32 @@ export function updateCharacter(
         }
         break
       }
-      // Inactive and idle — do nothing (no wandering). Wait for activation or idle seat path.
+      // Inactive and idle — periodically retry pathfinding to idle seat
+      if (ch.idleSeatId) {
+        ch.wanderTimer -= dt
+        if (ch.wanderTimer <= 0) {
+          ch.wanderTimer = 2.0 // retry every 2 seconds
+          const idleSeat = seats.get(ch.idleSeatId)
+          if (idleSeat) {
+            if (ch.tileCol === idleSeat.seatCol && ch.tileRow === idleSeat.seatRow) {
+              // Already at idle seat — sit down
+              ch.state = CharacterState.TYPE
+              ch.dir = idleSeat.facingDir
+              ch.frame = 0
+              ch.frameTimer = 0
+              break
+            }
+            const path = findPath(ch.tileCol, ch.tileRow, idleSeat.seatCol, idleSeat.seatRow, tileMap, blockedTiles)
+            if (path.length > 0) {
+              ch.path = path
+              ch.moveProgress = 0
+              ch.state = CharacterState.WALK
+              ch.frame = 0
+              ch.frameTimer = 0
+            }
+          }
+        }
+      }
       break
     }
 
