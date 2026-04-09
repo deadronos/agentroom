@@ -52,7 +52,9 @@ fi
 # ── 3. Build release ────────────────────────────────────────────────────────
 echo ""
 echo "→ Building CASS (release mode with LTO — this takes 3-8 minutes)..."
-cargo build --release --manifest-path "$CASS_DIR/Cargo.toml"
+# Must cd to CASS_DIR so rust-toolchain.toml is picked up
+cd "$CASS_DIR"
+cargo build --release
 echo "  ✓ Build complete"
 
 BINARY="$CASS_DIR/target/release/cass"
