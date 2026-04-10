@@ -1,339 +1,221 @@
 # AgentRoom
 
-A desktop app that turns your AI coding agents into animated pixel art characters in a virtual office — with full session search, transcript browsing, and real-time activity monitoring across Claude Code, Codex, and Gemini.
+A desktop app that turns your AI coding agents into animated pixel art characters in a virtual office — with full session search, transcript browsing, and real-time activity monitoring across Claude Code, Codex, Gemini, and more.
 
 ![AgentRoom screenshot](docs/screenshots/hero-office-tagged.png)
 
+## What's New: Split Architecture Session Monitoring
+
+AgentRoom now uses a **collector/hub/frontend** architecture for session monitoring that supports multiple machines:
+
+```
+┌─────────────────┐   WebSocket    ┌─────────────────┐   WebSocket   ┌─────────────────┐
+│    Collector    │ ─────────────► │       Hub       │ ◄─────────────│    Frontend     │
+│ (per machine,   │   snapshots   │  (central hub)   │  merged state │ (Tauri app or   │
+│  runs as daemon)│               │                  │               │  browser)       │
+└─────────────────┘               └─────────────────┘               └─────────────────┘
+         │                                │
+         │ notify filesystem watching     │ in-memory state
+         ▼                                ▼
+   session log files                 session map
+```
+
+- **Collector**: Runs on each machine, watches agent session files using filesystem events (not polling), sends snapshots to hub every 2 seconds or on change
+- **Hub**: Central service receiving snapshots from all collectors, merges state (latest-wins per session), broadcasts to frontends
+- **Frontend**: WebSocket client receiving real-time session events
+
+This replaces the old flaky polling-based single-process `session-daemon`.
+
+---
+
 ## Quick Start
 
-```bash
-# Prerequisites: Rust (rustup.rs), Node.js 18+, Xcode CLI tools (macOS) or webkit2gtk (Linux)
+### Prerequisites
 
-git clone --recursive https://github.com/liuyixin-louis/agentroom.git
+- Rust (rustup.rs)
+- Node.js 18+
+- Xcode CLI tools (macOS) or webkit2gtk (Linux)
+
+### Clone and Setup
+
+```bash
+git clone --recursive https://github.com/deadronos/agentroom.git
 cd agentroom
 
-# Build the CASS search backend (~5 min, one-time)
-./scripts/install-cass.sh
-source ~/.zshrc
+# Initialize submodules
+git submodule update --init --recursive
 
-# Index your agent sessions
-cass index --full
-
-# Launch the app
+# Install frontend dependencies
 npm install
+```
+
+### Build the Session Monitoring System
+
+The session monitoring system is written in Rust. The crates are in `src/` (planned for relocation to `search-backend/`):
+
+```bash
+# Build session-common (shared types)
+cargo build --package session_common
+
+# Build session-hub (central service)
+cargo build --package session_hub
+
+# Build session-collector (per-machine daemon)
+cargo build --package session_collector
+```
+
+Or build all at once from the workspace root if configured.
+
+### Run the System
+
+**Terminal 1 — Start the Hub:**
+
+```bash
+cd agentroom
+HUB_AUTH_TOKEN=secret \
+HUB_PORT=8080 \
+HUB_FRONTEND_PORT=8081 \
+cargo run --package session_hub
+```
+
+**Terminal 2 — Start the Collector (on each machine):**
+
+```bash
+cd agentroom
+HUB_URL=ws://localhost:8080 \
+HUB_AUTH_TOKEN=secret \
+COLLECTOR_ID=my-machine \
+cargo run --package session_collector
+```
+
+**Terminal 3 — Run the Tauri App:**
+
+```bash
 npm run tauri dev
 ```
+
+The pixel office window opens. Active coding agents appear as animated characters at desks.
+
+---
+
+## Architecture Details
+
+### Supported Agents
+
+| Agent | Session Paths |
+|-------|--------------|
+| Claude Code | `~/.claude/logs/*.jsonl`, `~/.claude/projects/*/sessions/` |
+| OpenClaw | `~/.openclaw/logs/*.jsonl`, `~/.openclaw/projects/*/sessions/` |
+| Copilot | `~/.github/copilot/*.jsonl` |
+| Codex | `~/.codex/logs/*.jsonl` |
+| OpenCode | `~/.opencode/logs/*.jsonl` |
+| Gemini | `~/.gemini/logs/*.jsonl` |
+
+### Transport Protocol
+
+**Collector → Hub:**
+- WebSocket connection: `ws://hub:8080/collectors?token=<HUB_AUTH_TOKEN>`
+- Collector sends snapshots every 2 seconds or when filesystem changes detected
+- Deduplication via SHA1 fingerprinting
+
+**Hub → Frontend:**
+- WebSocket connection: `ws://hub:8081/sessions`
+- Frontend receives `StateSync` on connect, then incremental events
+
+### Event Types
+
+```json
+{"type":"session_started","session_id":"abc-123","provider":"claude","project":"/Users/me/project",...}
+{"type":"activity","session_id":"abc-123","provider":"claude","timestamp":1712700001000,"tool":"Edit",...}
+{"type":"session_ended","session_id":"abc-123","provider":"claude","timestamp":1712700010000}
+{"type":"state_sync","sessions":[...]}
+```
+
+### Configuration
+
+**Collector environment variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HUB_URL` | `ws://localhost:8080` | Hub WebSocket endpoint |
+| `HUB_AUTH_TOKEN` | (required) | Bearer token for hub auth |
+| `COLLECTOR_ID` | hostname | Unique collector identifier |
+| `FLUSH_INTERVAL_MS` | `2000` | Snapshot publish interval |
+| `ACTIVE_THRESHOLD_MS` | `120000` | Filter sessions older than 2min |
+
+**Hub environment variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HUB_PORT` | `8080` | Collector ingestion port |
+| `HUB_FRONTEND_PORT` | `8081` | Frontend API port |
+| `HUB_AUTH_TOKEN` | (required) | Bearer token for collectors |
+
+---
+
+## File Structure
+
+```
+agentroom/
+├── src/                           # React frontend
+│   ├── session_common/           # Shared session types (Rust)
+│   ├── session_collector/        # Collector daemon (Rust)
+│   └── session_hub/              # Hub service (Rust)
+├── src-tauri/                    # Tauri desktop shell
+├── search-backend/               # CASS search engine (git submodule)
+│   ├── cass/                     # Search binary + TUI
+│   ├── asupersync/
+│   ├── frankensearch/
+│   └── franken_agent_detection/
+└── skills/                       # Claude Code skills
+```
+
+**Note:** The session monitoring Rust crates (`session_common`, `session_collector`, `session_hub`) are currently in `src/`. Future work may relocate them to `search-backend/` to integrate with the existing Rust workspace.
+
+---
 
 ## Features
 
 - **Real-time agent visualization** — each active coding agent gets its own animated character that types when writing code, reads when searching files, and idles when waiting for input
-- **Multi-agent support** — Claude Code, Codex, and Gemini agents displayed simultaneously with distinct visual styles
-- **Work & idle rooms** — active agents sit at desks in the Work Room; idle agents walk to the Break Room and hang out on couches
+- **Multi-agent support** — Claude Code, Codex, Gemini, OpenClaw, Copilot, and OpenCode agents displayed simultaneously with distinct visual styles
+- **Multi-machine support** — collectors run on each machine, feed into a central hub
+- **Work & idle rooms** — active agents sit at desks in the Work Room; idle agents walk to the Break Room
 - **Per-project focus** — switch the office view to show only agents working on a specific project
-- **Session search & browsing** — search across all agent sessions with full-text search powered by [CASS](https://github.com/Dicklesworthstone/coding_agent_session_search), grouped by project
+- **Session search & browsing** — search across all agent sessions with full-text search powered by CASS
 - **Transcript viewer** — click any session to read the full conversation in-app
-- **Open in Terminal** — one-click "Open in iTerm2" button to jump straight into a session's working directory and resume the agent
+- **Open in Terminal** — one-click "Open in iTerm2" button to jump straight into a session's working directory
 - **Sub-agent visualization** — Task tool sub-agents spawn as separate characters linked to their parent
-- **Speech bubbles** — visual indicators when an agent is waiting for input or needs permission approval
+- **Speech bubbles** — visual indicators when an agent is waiting for input or needs approval
 - **Sound notifications** — chime when an agent finishes its turn
 - **Token usage dashboard** — real-time spend and rate limit tracking
-- **AI-powered session tagging** — auto-summarize and categorize sessions
-- **Persistent layouts** — office design is saved per project
-- **Claude Code skill** — drop-in [`searching-agent-sessions`](skills/searching-agent-sessions/) skill lets you search past sessions from any Claude Code conversation (just copy to `~/.claude/skills/`)
 
-## How It Works
-
-AgentRoom watches the JSONL transcript files that coding agents write to disk. A Rust file watcher (`notify` crate) detects new lines in real time and emits structured events to the frontend via Tauri's event system. The React frontend drives a Canvas 2D game engine with BFS pathfinding and a character state machine.
-
-```
-JSONL files (Claude/Codex/Gemini)
-  -> Rust file watcher (notify + tokio)
-    -> AgentStateManager (event dedup + state tracking)
-      -> Tauri event bus
-        -> React useAgentEvents hook
-          -> OfficeState (Canvas 2D game engine)
-```
+---
 
 ## Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
-| **Shell** | [Tauri v2](https://tauri.app/) |
-| **Backend** | Rust (tokio, notify, serde_json) |
+|-------|------------|
+| **Shell** | Tauri v2 |
+| **Backend** | Rust (tokio, notify, tokio-tungstenite) |
 | **Frontend** | React 18 + TypeScript + Vite |
-| **Rendering** | Canvas 2D -- pixel-perfect at integer zoom levels |
-| **Search** | [CASS](search-backend/cass/) -- bundled as submodule |
-| **Tilesets** | 32x32px tiles from [SkyOffice](https://github.com/kevinshen56714/SkyOffice) |
+| **Rendering** | Canvas 2D |
+| **Search** | CASS (git submodule) |
+| **Session Monitoring** | session_collector + session_hub (new) |
 
 ---
 
-## Installation (End-to-End)
-
-Complete setup from a fresh machine to a running app.
-
-### Step 0 -- System Prerequisites
-
-**macOS:**
-```bash
-xcode-select --install
-```
-
-**Linux (Debian/Ubuntu):**
-```bash
-sudo apt update && sudo apt install -y \
-  build-essential curl wget git \
-  libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev \
-  librsvg2-dev patchelf libssl-dev
-```
-
-**Linux (Fedora):**
-```bash
-sudo dnf install -y \
-  gcc gcc-c++ make curl wget git \
-  webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel \
-  librsvg2-devel openssl-devel
-```
-
-### Step 1 -- Install Rust
-
-Skip if `cargo --version` already works.
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-source "$HOME/.cargo/env"
-rustc --version   # 1.85+ required (for Rust edition 2024)
-```
-
-### Step 2 -- Install Node.js
-
-Skip if `node --version` shows 18+.
-
-```bash
-# via nvm (recommended)
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.0/install.sh | bash
-source "$HOME/.nvm/nvm.sh"
-nvm install 22
-
-# or download directly from https://nodejs.org/
-```
-
-### Step 3 -- Clone with Submodules
-
-```bash
-git clone --recursive https://github.com/liuyixin-louis/agentroom.git
-cd agentroom
-```
-
-> Already cloned without `--recursive`? Run `git submodule update --init --recursive`
-
-### Step 4 -- Build the CASS Search Backend
-
-CASS indexes and searches your coding agent session histories. It compiles from source into a single binary.
-
-**Option A -- Automated install** (builds + adds to PATH):
-```bash
-./scripts/install-cass.sh
-source ~/.zshrc   # or: source ~/.bashrc
-```
-
-**Option B -- Manual build:**
-```bash
-cd search-backend/cass
-cargo build --release
-# Binary: search-backend/cass/target/release/cass
-
-# Install to PATH (pick one):
-sudo cp target/release/cass /usr/local/bin/cass   # system-wide
-# or: export PATH="$(pwd)/target/release:$PATH"   # session-only
-cd ../..
-```
-
-**Option C -- System-wide install** (uses sudo):
-```bash
-./scripts/install-cass.sh --system
-```
-
-Verify: `cass --version`
-
-> The release build takes 3-8 minutes (LTO enabled). Subsequent builds are fast.
-
-### Step 5 -- Build the Search Index
-
-```bash
-cass index --full       # scans all agent session directories
-cass health --json      # verify index health
-```
-
-CASS auto-detects sessions from these agents:
-
-| Agent | Session Path |
-|-------|-------------|
-| Claude Code | `~/.claude/projects/` |
-| Codex | `~/.codex/sessions/` |
-| Gemini CLI | `~/.gemini/tmp/` |
-| Cline | VS Code extension storage |
-| ChatGPT | `~/Library/Application Support/com.openai.chat/` |
-| Aider | `~/.aider.chat.history.md` |
-| Cursor | VS Code state SQLite files |
-| OpenCode | VS Code extension storage |
-| Pi-Agent | `~/.pi/agent/sessions/` |
-| Factory/Droid | `~/.factory/sessions/` |
-| Amp | Local Sourcegraph cache |
-
-### Step 6 -- Run the App
-
-```bash
-npm install
-npm run tauri dev
-```
-
-The pixel office window opens within seconds. Active coding agents appear as animated characters at desks.
-
-### Production Build
-
-```bash
-npm run tauri build
-```
-
-Output: `src-tauri/target/release/bundle/` (`.app`/`.dmg` on macOS, `.deb`/`.AppImage` on Linux).
-
-### Troubleshooting
+## Troubleshooting
 
 | Problem | Fix |
 |---------|-----|
-| `cass: command not found` | Run `source ~/.zshrc` or open a new terminal |
-| `cargo build` linker errors | Install system prerequisites (Step 0) |
-| `git submodule update` fails | Ensure submodule repos are accessible (see note below) |
-| `cass index` finds 0 sessions | Install and use at least one coding agent first |
-| `npm run tauri dev` webkit errors | Install Tauri system deps (Step 0, Linux only) |
-| CASS build is slow | Normal for first build -- release mode with LTO takes 3-8 min |
-
-> **Note on submodule access:** The search backend submodules are hosted on GitHub. If they are private repos, you'll need SSH access configured. Public repos work with HTTPS out of the box.
+| `command not found: cargo` | Install Rust: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| Collector can't connect to hub | Verify `HUB_AUTH_TOKEN` matches on both; check firewall rules |
+| No agents appearing | Ensure collector is running; check `COLLECTOR_ID` appears in hub logs |
+| Empty session list | Verify agent session files exist at expected paths |
+| Search not working | Run `cass index --full` to rebuild the index |
 
 ---
-
-## Search Backend (CASS)
-
-[CASS](https://github.com/Dicklesworthstone/coding_agent_session_search) (Coding Agent Session Search) is the search engine powering AgentRoom's session search. It's bundled as git submodules under `search-backend/`.
-
-### Architecture
-
-Sub-10ms interactive search across 11+ coding agent histories via a multi-layer search stack:
-
-| Layer | Latency | Technique |
-|-------|---------|-----------|
-| Prefix cache (LRU + Bloom) | <5ms | Hot-path cache hits |
-| Tantivy full-text (BM25) | 5-100ms | Inverted index + edge n-grams |
-| Semantic search (FastEmbed) | 100-1000ms | MiniLM-384 embeddings + HNSW |
-| Hybrid RRF fusion | 100-1500ms | Reciprocal Rank Fusion (K=60) |
-
-### Submodule Layout
-
-```
-search-backend/
-|-- cass/                       # Search engine + interactive TUI
-|-- asupersync/                 # Async runtime
-|-- frankentui/                 # Terminal UI framework
-|-- frankensearch/              # Lexical, semantic, and fusion search
-|-- franken_agent_detection/    # Agent auto-detection (11 connectors)
-+-- toon_rust/                  # Shared utilities
-```
-
-### CASS Usage
-
-```bash
-cass index --full                              # rebuild index
-cass search "auth error"                       # keyword search
-cass search "rate limiting" --mode hybrid      # lexical + semantic
-cass timeline --since 7d                       # recent activity
-cass tui                                       # interactive TUI
-cass health --json                             # index health check
-```
-
-For programmatic / AI agent integration (JSON output):
-```bash
-cass search "query" --json --limit 20 --highlight
-cass export "/path/to/session.jsonl" --format markdown
-```
-
-### Claude Code Skill (standalone)
-
-The repo includes a ready-to-use Claude Code skill that lets you search sessions from any Claude Code conversation — no desktop app needed.
-
-```bash
-# Install the skill (one-time)
-cp -r skills/searching-agent-sessions ~/.claude/skills/
-
-# Then in any Claude Code session, just ask:
-#   "find my session about authentication"
-#   "what did I discuss with gemini about rate limiting?"
-#   "show recent codex sessions"
-```
-
-The skill handles cross-agent search, workspace resolution, subagent deduplication, and outputs ready-to-paste resume commands. See [`skills/searching-agent-sessions/README.md`](skills/searching-agent-sessions/README.md) for details.
-
----
-
-## Project Structure
-
-```
-agentroom-visual/
-|-- src/                        # React frontend
-|   |-- office/                 # Game engine
-|   |   |-- engine/             # Renderer, characters, pathfinding
-|   |   |-- tilesets/           # TilesetManager, background gid map
-|   |   |-- sprites/            # Character sprite data
-|   |   +-- layout/             # Office layout serialization
-|   |-- components/             # UI panels (SearchBar, SessionList, etc.)
-|   |-- hooks/                  # useAgentEvents (core event bridge)
-|   |-- services/               # CASS client, tag service
-|   +-- bridge.ts               # Tauri invoke/listen bridge
-|-- src-tauri/                  # Rust backend
-|   +-- src/
-|       |-- file_watcher.rs     # JSONL file watching + initial scan
-|       |-- agent_state.rs      # Agent state machine + event emission
-|       |-- commands.rs         # Tauri commands (CASS, tags, layout)
-|       +-- transcript_parser.rs # JSONL line parsing
-|-- search-backend/             # CASS search engine (git submodules)
-|   |-- cass/                   # Main search binary + TUI
-|   |-- asupersync/             # Async runtime
-|   |-- frankentui/             # TUI framework
-|   |-- frankensearch/          # Lexical + semantic + fusion search
-|   |-- franken_agent_detection/ # Agent connector detection
-|   +-- toon_rust/              # Utilities
-|-- scripts/
-|   |-- build-cass.sh           # Build CASS from source
-|   +-- install-cass.sh         # Full install (build + PATH setup)
-|-- skills/
-|   +-- searching-agent-sessions/  # Claude Code skill (copy to ~/.claude/skills/)
-+-- public/assets/              # Tilesets, character sprites
-```
-
-## Acknowledgments
-
-**Search & Indexing:**
-- **[CASS](https://github.com/Dicklesworthstone/coding_agent_session_search)** by Jeffrey Emanuel -- unified search over local coding agent histories, plus the bundled [asupersync](https://github.com/Dicklesworthstone/asupersync), [frankensearch](https://github.com/Dicklesworthstone/frankensearch), [frankentui](https://github.com/Dicklesworthstone/frankentui), [franken_agent_detection](https://github.com/Dicklesworthstone/franken_agent_detection), and [toon_rust](https://github.com/Dicklesworthstone/toon_rust) libraries
-- **[Tantivy](https://github.com/quickwit-oss/tantivy)** -- full-text search engine (BM25 inverted index) powering CASS lexical search
-- **[FastEmbed](https://github.com/Anush008/fastembed-rs)** -- MiniLM-384 embeddings for semantic search
-
-**Desktop & Framework:**
-- **[Tauri](https://tauri.app/)** -- desktop app shell with Rust backend and web frontend
-- **[iTerm2](https://iterm2.com/)** -- "Open in iTerm2" terminal integration via AppleScript
-
-**Agent Integrations:**
-- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** by Anthropic -- primary agent support
-- **[Codex CLI](https://github.com/openai/codex)** by OpenAI -- Codex agent session support
-- **[Gemini CLI](https://github.com/google-gemini/gemini-cli)** by Google -- Gemini agent session support
-- **[Aider](https://github.com/paul-gauthier/aider)** by Paul Gauthier -- Aider session support
-- **[Cline](https://github.com/cline/cline)** -- VS Code agent extension session support
-- **[CodexBar](https://github.com/steipete/CodexBar)** by Peter Steinberger -- macOS menu bar usage stats for Codex/Claude/Gemini (token panel integration)
-
-**Visual Assets:**
-- **[Pixel Agents](https://github.com/pablodelucca/pixel-agents)** by Pablo de Lucca -- the original pixel art agent visualization (VS Code extension) from which the game engine is ported
-- **[SkyOffice](https://github.com/kevinshen56714/SkyOffice)** by Kevin Shen -- tileset assets (FloorAndGround, Modern_Office, Generic, Basement)
-- **[LimeZu](https://limezu.itch.io/)** -- pixel art assets used in SkyOffice's tilesets
-- **[JIK-A-4 (Metro City)](https://jik-a-4.itch.io/metrocity-free-topdown-character-pack)** -- character sprite base
 
 ## License
 
-[MIT](LICENSE)
+MIT
