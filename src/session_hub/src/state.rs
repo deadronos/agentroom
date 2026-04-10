@@ -18,7 +18,7 @@ impl HubState {
     }
 
     pub async fn apply_snapshot(&self, snapshot: session_common::Snapshot) -> SessionDiff {
-        let mut old_session_ids = self.merged_sessions.read().await.keys().cloned().collect::<HashSet<_>>();
+        let old_session_ids = self.merged_sessions.read().await.keys().cloned().collect::<HashSet<_>>();
         
         self.collector_snapshots.write().await.insert(
             snapshot.collector_id.clone(),
@@ -72,5 +72,6 @@ impl HubState {
 pub struct SessionDiff {
     pub started: Vec<String>,
     pub ended: Vec<String>,
+    #[allow(dead_code)]
     pub existing: Vec<String>,
 }

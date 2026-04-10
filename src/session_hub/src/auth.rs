@@ -3,11 +3,13 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct Auth {
     token: String,
     connected_collectors: Arc<RwLock<HashMap<String, std::time::Instant>>>,
 }
 
+#[allow(dead_code)]
 impl Auth {
     pub fn new(token: String) -> Self {
         Self {

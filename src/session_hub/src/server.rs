@@ -5,6 +5,7 @@ use tokio_tungstenite::{accept_async, tungstenite::{Message}};
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpListener;
 
+#[allow(dead_code)]
 pub struct HubServer {
     state: HubState,
     auth: Auth,
@@ -12,6 +13,7 @@ pub struct HubServer {
     frontend_port: u16,
 }
 
+#[allow(dead_code)]
 impl HubServer {
     pub fn new(auth_token: String, collector_port: u16, frontend_port: u16) -> Self {
         Self {
@@ -80,6 +82,7 @@ impl HubServer {
     }
 }
 
+#[allow(dead_code)]
 async fn handle_collector_connection(
     stream: tokio::net::TcpStream,
     state: HubState,
@@ -121,6 +124,7 @@ async fn handle_collector_connection(
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn handle_frontend_connection(
     stream: tokio::net::TcpStream,
     state: HubState,
