@@ -1,67 +1,80 @@
-# Session Monitoring Implementation Plan
+# Session Monitoring Implementation Plan (Split Architecture)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement full live session monitoring — a `cass session-daemon` WebSocket server that streams real-time session events by combining filesystem watch (notify crate) + 5s polling fallback, driven by a new `SessionMonitor` trait in `franken_agent_detection`.
+**Goal:** Implement a distributed session monitoring system with collector/hub/frontend split architecture: collectors run on each machine watching session files, hub receives snapshots and broadcasts merged state, frontend streams events to clients via WebSocket.
 
-**Architecture:** Three-phase build: (1) new `SessionMonitor` trait extending `Connector` in franken_agent_detection with implementations for all connectors, (2) new `session_monitor` module in cass bridging franken_agent_detection to a tokio-tungstenite WebSocket server, (3) integration tying filesystem watch events + polling diffing to JSONL event emission.
+**Architecture:** Three binaries: `session-collector` (daemon per machine), `session-hub` (central service), sharing `session_common` crate. Collectors use `notify` crate for filesystem watching, publish snapshots via WebSocket every 2s (or on dirty flag). Hub merges snapshots with latest-wins per sessionId, broadcasts to frontends. Bearer token auth between collector↔hub.
 
-**Tech Stack:** Rust (tokio async runtime already in cass), tokio-tungstenite for WebSocket server, notify crate (already in cass) for filesystem watching, asupersync runtime (already in cass).
+**Tech Stack:** Rust with tokio async runtime, tokio-tungstenite for WebSocket, notify crate for filesystem watching, sha1 for fingerprinting, serde/serde_json for serialization.
 
 ---
 
 ## File Structure
 
 ```
-search-backend/
-  franken_agent_detection/src/
-    connectors/
-      mod.rs                      # extend Connector → add SessionMonitor impls
-      openclaw.rs                 # add SessionMonitor impl
-      copilot.rs                  # add SessionMonitor impl
-      copilot_cli.rs             # add SessionMonitor impl
-      claude_code.rs             # add SessionMonitor impl
-      aider.rs, amp.rs, ...       # add SessionMonitor impl (all 15)
-    session_monitor.rs            # NEW: trait + types (ActiveSession, SessionDetail, WatchPath)
-
-search-backend/cass/src/
-  session_daemon/
-    mod.rs                       # NEW: top-level module
-    watcher.rs                   # NEW: SessionWatcher combining notify + polling
-    events.rs                    # NEW: event types + JSONL serialization
-    server.rs                    # NEW: WebSocket server logic
-  lib.rs                         # add SessionDaemon command variant
-  main.rs                        # add "session-daemon" subcommand dispatch
+src/
+├── session_common/                    # Shared types (no dependencies)
+│   ├── Cargo.toml
+│   └── src/
+│       ├── lib.rs
+│       ├── types.rs                   # Snapshot, ActiveSession, SessionEvent
+│       └── adapter.rs                 # SessionAdapter trait
+├── session_collector/                # Collector binary
+│   ├── Cargo.toml
+│   └── src/
+│       ├── main.rs
+│       ├── collector.rs              # Snapshot building + deduplication
+│       ├── client.rs                 # WebSocket client to hub
+│       ├── watcher.rs                # notify-based filesystem watcher
+│       └── adapters/
+│           ├── mod.rs
+│           ├── claude.rs             # Claude Code adapter
+│           ├── openclaw.rs
+│           ├── copilot.rs
+│           ├── codex.rs
+│           ├── opencode.rs
+│           └── gemini.rs
+└── session_hub/                       # Hub binary
+    ├── Cargo.toml
+    └── src/
+        ├── main.rs
+        ├── server.rs                 # WebSocket server (collector + frontend)
+        ├── state.rs                  # Session state management + merge
+        └── auth.rs                   # Bearer token validation
 ```
 
 ---
 
-## Task 1: SessionMonitor Trait and Types
+## Task 1: Create session_common crate
 
 **Files:**
-- Create: `search-backend/franken_agent_detection/src/connectors/session_monitor.rs`
-- Modify: `search-backend/franken_agent_detection/src/connectors/mod.rs` (export new trait)
-- Modify: `search-backend/franken_agent_detection/src/lib.rs` (re-export)
+- Create: `src/session_common/Cargo.toml`
+- Create: `src/session_common/src/lib.rs`
+- Create: `src/session_common/src/types.rs`
+- Create: `src/session_common/src/adapter.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Create Cargo.toml**
 
-Create `franken_agent_detection/src/connectors/session_monitor.rs` with the trait and all types. The trait has 4 methods: `is_available()`, `active_sessions()`, `session_detail()`, `watch_paths()`. Add `ActiveSession`, `SessionDetail`, `WatchPath`, `WatchType`, `ToolUse`, `Message`, `TokenUsage` types matching the spec exactly.
+```toml
+[package]
+name = "session_common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1 = "0.10"
+```
+
+- [ ] **Step 2: Create types.rs**
 
 ```rust
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub enum WatchType {
-    File,
-    Directory,
-}
-
-pub struct WatchPath {
-    pub path: PathBuf,
-    pub watch_type: WatchType,
-    pub filter: Option<String>,
-    pub recursive: bool,
-}
-
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActiveSession {
     pub session_id: String,
     pub provider: String,
@@ -77,228 +90,16 @@ pub struct ActiveSession {
     pub parent_session_id: Option<String>,
 }
 
-pub struct ToolUse {
-    pub tool: String,
-    pub detail: Option<String>,
-    pub ts: i64,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Snapshot {
+    pub collector_id: String,
+    pub timestamp: i64,
+    pub fingerprint: String,
+    pub sessions: Vec<ActiveSession>,
 }
 
-pub struct Message {
-    pub role: String,
-    pub text: String,
-    pub ts: i64,
-}
-
-pub struct TokenUsage {
-    pub input_tokens: Option<u64>,
-    pub output_tokens: Option<u64>,
-}
-
-pub struct SessionDetail {
-    pub tool_history: Vec<ToolUse>,
-    pub messages: Vec<Message>,
-    pub token_usage: Option<TokenUsage>,
-}
-
-pub trait SessionMonitor {
-    fn is_available(&self) -> bool;
-    fn active_sessions(&self, active_threshold_ms: u64) -> Vec<ActiveSession>;
-    fn session_detail(&self, session_id: &str, project: Option<&str>) -> SessionDetail;
-    fn watch_paths(&self) -> Vec<WatchPath>;
-}
-```
-
-- [ ] **Step 2: Verify the file compiles**
-
-Run: `cd search-backend/franken_agent_detection && cargo check --features connectors`
-
-Expected: compilation succeeds (the trait and types are well-formed)
-
-- [ ] **Step 3: Export the trait from connectors/mod.rs**
-
-Add `pub mod session_monitor;` and re-export: `pub use session_monitor::{SessionMonitor, ActiveSession, SessionDetail, WatchPath, WatchType, ToolUse, Message, TokenUsage};`
-
-Run: `cargo check --features connectors` again — expected: PASS
-
-- [ ] **Step 4: Re-export from lib.rs**
-
-Add to the `#[cfg(feature = "connectors")]` block in lib.rs:
-```rust
-pub use connectors::session_monitor::{SessionMonitor, ActiveSession, SessionDetail, WatchPath, WatchType, ToolUse, Message, TokenUsage};
-```
-
-Run: `cargo check --features connectors` — expected: PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add search-backend/franken_agent_detection/src/connectors/session_monitor.rs
-git add search-backend/franken_agent_detection/src/connectors/mod.rs
-git add search-backend/franken_agent_detection/src/lib.rs
-git commit -m "feat(frankensearch): add SessionMonitor trait and session types"
-```
-
----
-
-## Task 2: Implement SessionMonitor for openclaw Connector
-
-**Files:**
-- Modify: `search-backend/franken_agent_detection/src/connectors/openclaw.rs`
-- Test: `search-backend/franken_agent_detection/src/connectors/openclaw.rs` (add tests)
-
-- [ ] **Step 1: Add SessionMonitor impl to openclaw.rs**
-
-Read the full `openclaw.rs` connector to understand its structure (it parses JSONL sessions already). Add:
-
-```rust
-use super::session_monitor::{SessionMonitor, ActiveSession, SessionDetail, WatchPath, WatchType, ToolUse, Message};
-
-impl SessionMonitor for OpenClawConnector {
-    fn is_available(&self) -> bool {
-        Self::agents_root().map(|p| p.exists()).unwrap_or(false)
-    }
-
-    fn active_sessions(&self, active_threshold_ms: u64) -> Vec<ActiveSession> {
-        let session_dirs = Self::find_agent_session_dirs();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
-
-        let mut sessions = Vec::new();
-        for sessions_dir in session_dirs {
-            if let Ok(entries) = std::fs::read_dir(sessions_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
-                        continue;
-                    }
-                    if let Ok(stat) = std::fs::metadata(&path) {
-                        let mtime = stat.modified().unwrap_or(std::time::UNIX_EPOCH);
-                        let mtime_ms = mtime.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
-                        if now - mtime_ms > active_threshold_ms as i64 {
-                            continue;
-                        }
-                        let detail = self.parse_session_detail(&path);
-                        let agent_id = sessions_dir.parent().and_then(|p| p.file_name()).map(|s| s.to_string_lossy().to_string());
-                        let session_id = format!("openclaw:{}:{}", agent_id.clone().unwrap_or_default(), path.file_stem().unwrap_or_default().to_string_lossy());
-                        sessions.push(ActiveSession {
-                            session_id,
-                            provider: "openclaw".to_string(),
-                            agent_id,
-                            agent_type: "main".to_string(),
-                            model: detail.0,
-                            status: "active".to_string(),
-                            last_activity: mtime_ms,
-                            project: detail.1,
-                            last_message: detail.2,
-                            last_tool: detail.3,
-                            last_tool_input: detail.4,
-                            parent_session_id: None,
-                        });
-                    }
-                }
-            }
-        }
-        sessions
-    }
-
-    fn session_detail(&self, session_id: &str, _project: Option<&str>) -> SessionDetail {
-        // parse session_id → agent_id and file stem, read file, return tool_history + messages
-        let parts: Vec<&str> = session_id.split(':').collect();
-        if parts.len() < 3 { return SessionDetail { tool_history: vec![], messages: vec![], token_usage: None }; }
-        let agent_id = parts.get(1).unwrap_or(&"");
-        let file_id = parts.get(2).unwrap_or(&"");
-        let agents_root = Self::agents_root().unwrap_or_default();
-        let session_path = agents_root.join(agent_id).join("sessions").join(format!("{}.jsonl", file_id));
-        self.parse_session_detail_full(&session_path)
-    }
-
-    fn watch_paths(&self) -> Vec<WatchPath> {
-        Self::find_agent_session_dirs()
-            .into_iter()
-            .map(|p| WatchPath { path: p, watch_type: WatchType::Directory, filter: Some(".jsonl".to_string()), recursive: false })
-            .collect()
-    }
-}
-
-// Helper methods on OpenClawConnector:
-fn parse_session_detail(&self, path: &Path) -> (String, Option<String>, Option<String>, Option<String>, Option<String>) {
-    // Read last 80 lines of JSONL file, parse backwards to extract model, project, last_message, last_tool, last_tool_input
-    // Returns (model, project, last_message, last_tool, last_tool_input)
-}
-
-fn parse_session_detail_full(&self, path: &Path) -> SessionDetail {
-    // Read full file, extract all tool_use blocks → tool_history, recent text messages
-}
-```
-
-**Important:** Implement the helper methods by reading the existing openclaw.rs connector's parsing logic and adapting it. The connector already has JSONL reading and parsing code in its `scan()` method — reuse that pattern.
-
-- [ ] **Step 2: Run tests**
-
-Run: `cd search-backend/franken_agent_detection && cargo test --features connectors openclaw` (or whatever test name pattern exists)
-
-Expected: PASS (existing tests still pass + new impl compiles)
-
-- [ ] **Step 3: Add unit test for SessionMonitor**
-
-Add a `#[cfg(test)]` module to openclaw.rs with a test that calls `is_available()`, `active_sessions(60000)`, and `watch_paths()` and asserts the return types.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add search-backend/franken_agent_detection/src/connectors/openclaw.rs
-git commit -m "feat(openclaw): implement SessionMonitor for openclaw connector"
-```
-
----
-
-## Task 3: Implement SessionMonitor for remaining connectors
-
-**Files:**
-- Modify: each connector file in `search-backend/franken_agent_detection/src/connectors/`
-
-For each connector (copilot, copilot_cli, claude_code, aider, amp, clawdbot, cline, codex, factory, gemini, kimi, pi_agent, qwen, vibe, cursor, goose, hermes, crush, chatgpt, opencode):
-
-- [ ] **Implement SessionMonitor** — follow the same pattern as openclaw but adapted to each connector's session file format and location
-
-Each connector has different session storage:
-- `copilot` — VS Code extension state, look for conversation history files
-- `copilot_cli` — `~/.github/copilot/` or similar
-- `claude_code` — `~/.claude/projects/` JSONL files
-- `aider` — `~/.aider/**/` chat history
-- etc.
-
-Use existing `scan()` method patterns as reference. For connectors with SQLite session stores (cursor, goose, hermes, crush, opencode), read sessions from the DB.
-
-**Note:** Focus on openclaw, copilot, copilot_cli, and claude_code first since those are the most commonly used. Others can follow the same pattern.
-
-- [ ] **Run tests per connector**
-
-For each: `cargo test --features connectors <connector_name>`
-
----
-
-## Task 4: cass session-daemon WebSocket server
-
-**Files:**
-- Create: `search-backend/cass/src/session_daemon/mod.rs`
-- Create: `search-backend/cass/src/session_daemon/events.rs`
-- Create: `search-backend/cass/src/session_daemon/watcher.rs`
-- Create: `search-backend/cass/src/session_daemon/server.rs`
-- Modify: `search-backend/cass/src/lib.rs` — add `SessionDaemon` command
-- Modify: `search-backend/cass/src/main.rs` — route `session-daemon` subcommand
-
-### events.rs — Event types + JSONL
-
-- [ ] **Write event types and JSONL serialization**
-
-```rust
-use serde::Serialize;
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum SessionEvent {
     SessionStarted {
         session_id: String,
@@ -308,6 +109,8 @@ pub enum SessionEvent {
         timestamp: i64,
         last_tool: Option<String>,
         last_message: Option<String>,
+        agent_id: Option<String>,
+        agent_type: String,
     },
     Activity {
         session_id: String,
@@ -323,216 +126,1460 @@ pub enum SessionEvent {
     },
 }
 
-impl SessionEvent {
-    /// Serialize to a JSON line (no trailing newline — caller adds it)
-    pub fn to_jsonl(&self) -> String {
-        serde_json::to_string(self).unwrap_or_default()
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum CollectorMessage {
+    Snapshot {
+        collector_id: String,
+        timestamp: i64,
+        fingerprint: String,
+        sessions: Vec<ActiveSession>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum HubMessage {
+    Ack { fingerprint: String },
+    Error { message: String },
+    SessionStarted {
+        session_id: String,
+        provider: String,
+        project: Option<String>,
+        model: String,
+        timestamp: i64,
+        last_tool: Option<String>,
+        last_message: Option<String>,
+        agent_id: Option<String>,
+        agent_type: String,
+    },
+    Activity {
+        session_id: String,
+        provider: String,
+        timestamp: i64,
+        tool: Option<String>,
+        message_preview: Option<String>,
+    },
+    SessionEnded {
+        session_id: String,
+        provider: String,
+        timestamp: i64,
+    },
+    StateSync { sessions: Vec<ActiveSession> },
 }
 ```
 
-### watcher.rs — SessionWatcher combining notify + polling
-
-- [ ] **Write SessionWatcher combining notify crate + 5s polling**
+- [ ] **Step 3: Create adapter.rs**
 
 ```rust
-use notify::{RecommendedWatcher, RecursiveMode, Watcher, Config as NotifyConfig};
-use std::collections::HashSet;
-use std::sync::Arc;
-use tokio::sync::mpsc;
+use std::path::PathBuf;
+use super::types::ActiveSession;
 
-pub struct SessionWatcher {
-    /// Active session IDs from last poll (for diffing)
-    previous_sessions: Arc<Mutex<HashSet<String>>>,
-    /// Channel to emit new/changed sessions
-    session_tx: mpsc::Sender<SessionEvent>,
-    /// Handles for each connector's watcher
-    watchers: Vec<RecommendedWatcher>,
+#[derive(Debug, Clone)]
+pub enum WatchType {
+    File,
+    Directory,
 }
 
-impl SessionWatcher {
-    pub fn new(session_tx: mpsc::Sender<SessionEvent>) -> Self { ... }
+#[derive(Debug, Clone)]
+pub struct WatchPath {
+    pub path: PathBuf,
+    pub watch_type: WatchType,
+    pub filter: Option<String>,
+    pub recursive: bool,
+}
 
-    /// Start filesystem watchers for all available connectors
-    pub fn start_watchers(&mut self, connectors: &[Box<dyn SessionMonitor + Send>]) { ... }
-
-    /// Poll all connectors and emit diff events
-    pub async fn poll_and_diff(&self) { ... }
-
-    /// Run the combined watch + poll loop
-    pub async fn run(&mut self, poll_interval: std::time::Duration) { ... }
+pub trait SessionAdapter: Send + Sync {
+    fn name(&self) -> &str;
+    fn is_available(&self) -> bool;
+    fn watch_paths(&self) -> Vec<WatchPath>;
+    fn active_sessions(&self, threshold_ms: u64) -> Vec<ActiveSession>;
+    fn session_detail(&self, session_id: &str) -> Option<super::types::ActiveSession>;
 }
 ```
 
-Key logic:
-1. On startup, do one full `active_sessions()` poll to populate `previous_sessions`
-2. Start notify watchers on all `watch_paths()` from each connector
-3. Every `poll_interval` (5s), call `active_sessions()` again
-4. Diff: sessions in new but not old → `SessionStarted`; sessions in old but not new → `SessionEnded`; sessions in both but changed (e.g., new mtime) → `Activity`
-5. On filesystem events from notify, trigger immediate poll for that connector's paths
-
-### server.rs — WebSocket server
-
-- [ ] **Write WebSocket server using tokio-tungstenite**
+- [ ] **Step 4: Create lib.rs**
 
 ```rust
-use tokio_tungstenite::{accept_async, tungstenite::Message};
-use std::net::SocketAddr;
+pub mod types;
+pub mod adapter;
 
-pub async fn run_websocket_server(
-    port: u16,
-    session_rx: mpsc::Receiver<SessionEvent>,
-) -> anyhow::Result<()> {
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    tracing::info!("Session daemon WebSocket server listening on port {port}");
-
-    loop {
-        let (stream, _) = listener.accept().await?;
-        let session_rx = session_rx.clone();
-        tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, session_rx).await {
-                tracing::warn!("WebSocket connection error: {e}");
-            }
-        });
-    }
-}
-
-async fn handle_connection(
-    stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
-    mut session_rx: mpsc::Receiver<SessionEvent>,
-) -> anyhow::Result<()> {
-    let (write, _) = tokio_tungstenite::WebSocketStream::split(stream);
-    let mut write = tokio::io::BufWriter::new(write);
-
-    loop {
-        tokio::select! {
-            Some(event) = session_rx.recv() => {
-                let line = event.to_jsonl();
-                write.write_all(line.as_bytes()).await?;
-                write.write_all(b"\n").await?;
-                write.flush().await?;
-            }
-            _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
-                // Keep-alive ping — send newline
-                write.write_all(b"\n").await?;
-                write.flush().await?;
-            }
-        }
-    }
-}
+pub use types::{ActiveSession, Snapshot, SessionEvent, CollectorMessage, HubMessage};
+pub use adapter::{SessionAdapter, WatchPath, WatchType};
 ```
 
-### mod.rs — top-level module
+- [ ] **Step 5: Verify compilation**
 
-- [ ] **Write session_daemon module**
+Run: `cd src/session_common && cargo check`
+Expected: PASS
 
-```rust
-pub mod events;
-pub mod watcher;
-pub mod server;
-
-pub use events::SessionEvent;
-pub use watcher::SessionWatcher;
-pub use server::run_websocket_server;
-```
-
-### lib.rs — add SessionDaemon command
-
-- [ ] **Add `SessionDaemon` variant to `Commands` enum**
-
-Read the Commands enum in lib.rs around line 140, find where `Daemon` is defined (line 835), and add nearby:
-
-```rust
-/// Run the live session monitoring daemon (WebSocket server)
-SessionDaemon {
-    /// WebSocket port to listen on (default: 8080)
-    #[arg(long, default_value_t = 8080)]
-    port: u16,
-    /// Active session threshold in milliseconds (default: 60000 = 1 minute)
-    #[arg(long, default_value_t = 60000)]
-    active_threshold_ms: u64,
-    /// Poll interval in seconds (default: 5)
-    #[arg(long, default_value_t = 5)]
-    poll_interval_secs: u64,
-},
-```
-
-- [ ] **Handle SessionDaemon in run_with_parsed**
-
-Find the match on `cli.command` in lib.rs around line 3605, add a branch:
-
-```rust
-Some(Commands::SessionDaemon { port, active_threshold_ms, poll_interval_secs }) => {
-    use cass::session_daemon::{run_websocket_server, SessionWatcher};
-    use tokio::sync::mpsc;
-    use franken_agent_detection::connectors::{get_connector_factories, SessionMonitor};
-
-    let (tx, rx) = mpsc::channel(1000);
-    let mut watcher = SessionWatcher::new(tx);
-
-    // Build connector list
-    let factories = get_connector_factories();
-    let connectors: Vec<_> = factories
-        .into_iter()
-        .filter_map(|(_, create)| {
-            let conn = create();
-            if conn.is_available() { Some(conn) } else { None }
-        })
-        .collect();
-
-    watcher.start_watchers(&connectors);
-    watcher.run(tokio::time::Duration::from_secs(poll_interval_secs)).await;
-    Ok(())
-}
-```
-
-Actually this needs more thought — the watcher runs forever, so it needs to spawn the WebSocket server separately. Refactor so `SessionWatcher::run()` spawns the server internally, or have `run_with_parsed` spawn both as separate tasks.
-
-Simplest approach: `SessionWatcher::spawn_server()` that starts the WebSocket server in a background task, and `SessionWatcher::run()` that runs the watch/poll loop. Both spawned via `tokio::spawn`.
-
-- [ ] **Run cargo check**
-
-Run: `cd search-backend/cass && cargo check`
-
-Expected: compilation succeeds with new module
-
-- [ ] **Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add search-backend/cass/src/session_daemon/
-git add search-backend/cass/src/lib.rs
-git add search-backend/cass/src/main.rs
-git commit -m "feat(cass): add session-daemon WebSocket command for live session monitoring"
+git add src/session_common/
+git commit -m "feat(session_common): add shared types and SessionAdapter trait"
 ```
 
 ---
 
-## Task 5: Integration test
+## Task 2: Create session_collector crate scaffolding
 
 **Files:**
-- Create: `search-backend/cass/tests/session_daemon.rs`
+- Create: `src/session_collector/Cargo.toml`
+- Create: `src/session_collector/src/main.rs` (minimal main)
 
-- [ ] **Write integration test**
+- [ ] **Step 1: Create Cargo.toml**
+
+```toml
+[package]
+name = "session_collector"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "session-collector"
+path = "src/main.rs"
+
+[dependencies]
+session_common = { path = "../session_common" }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.21"
+futures-util = "0.3"
+notify = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1 = "0.10"
+url = "2"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+hostname = "0.4"
+```
+
+- [ ] **Step 2: Create minimal main.rs**
 
 ```rust
-use std::time::Duration;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-#[tokio::test]
-async fn session_daemon_smoke_test() {
-    // Start daemon in background
-    // Connect WebSocket client to port
-    // Wait for initial sessions or timeout after 2s
-    // Send ping, expect pong
-    // Verify JSONL parseable
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+    
+    tracing::info!("session-collector starting...");
+    // TODO: implement
+    Ok(())
 }
 ```
+
+- [ ] **Step 3: Verify compilation**
+
+Run: `cd src/session_collector && cargo check`
+Expected: PASS
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/session_collector/Cargo.toml src/session_collector/src/
+git commit -m "feat(session_collector): scaffold collector binary"
+```
+
+---
+
+## Task 3: Implement SessionAdapter for claude adapter
+
+**Files:**
+- Create: `src/session_collector/src/adapters/claude.rs`
+- Modify: `src/session_collector/src/adapters/mod.rs`
+
+- [ ] **Step 1: Create adapters/mod.rs**
+
+```rust
+mod claude;
+mod openclaw;
+mod copilot;
+mod codex;
+mod opencode;
+mod gemini;
+
+pub use claude::ClaudeAdapter;
+pub use openclaw::OpenClawAdapter;
+pub use copilot::CopilotAdapter;
+pub use codex::CodexAdapter;
+pub use opencode::OpenCodeAdapter;
+pub use gemini::GeminiAdapter;
+```
+
+- [ ] **Step 2: Create claude.rs**
+
+```rust
+use std::path::PathBuf;
+use session_common::{ActiveSession, SessionAdapter, WatchPath, WatchType};
+use sha1::{Sha1, Digest};
+
+pub struct ClaudeAdapter;
+
+impl ClaudeAdapter {
+    pub fn new() -> Self {
+        Self
+    }
+
+    fn home_dir() -> PathBuf {
+        dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+    }
+
+    fn log_dir() -> PathBuf {
+        Self::home_dir().join(".claude").join("logs")
+    }
+
+    fn projects_dir() -> PathBuf {
+        Self::home_dir().join(".claude").join("projects")
+    }
+
+    fn parse_session_id(path: &PathBuf) -> String {
+        path.file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string())
+            .unwrap_or_default()
+    }
+
+    fn parse_jsonl_entry(line: &str) -> Option<(i64, Option<String>, Option<String>)> {
+        // Parse JSONL line: extract last_tool, last_message, timestamp
+        // Expected format: {"type":"tool","name":"Edit",...} or {"type":"user","text":"..."}
+        let json: serde_json::Value = serde_json::from_str(line).ok()?;
+        let ts = json.get("ts").and_then(|v| v.as_i64()).unwrap_or(0);
+        let tool = json.get("name").and_then(|v| v.as_str()).map(String::from);
+        let text = json.get("text").and_then(|v| v.as_str()).map(String::from);
+        Some((ts, tool.or(text), tool))
+    }
+
+    fn read_last_jsonl_entry(path: &PathBuf) -> Option<(Option<String>, Option<String>, i64)> {
+        let content = std::fs::read_to_string(path).ok()?;
+        let lines: Vec<&str> = content.lines().collect();
+        let last_line = lines.last()?;
+        let (ts, msg, tool) = Self::parse_jsonl_entry(last_line)?;
+        Some((msg, tool, ts))
+    }
+}
+
+impl SessionAdapter for ClaudeAdapter {
+    fn name(&self) -> &str {
+        "claude"
+    }
+
+    fn is_available(&self) -> bool {
+        Self::log_dir().exists() || Self::projects_dir().exists()
+    }
+
+    fn watch_paths(&self) -> Vec<WatchPath> {
+        let mut paths = Vec::new();
+        let log_dir = Self::log_dir();
+        if log_dir.exists() {
+            paths.push(WatchPath {
+                path: log_dir,
+                watch_type: WatchType::Directory,
+                filter: Some("*.jsonl".to_string()),
+                recursive: true,
+            });
+        }
+        let projects_dir = Self::projects_dir();
+        if projects_dir.exists() {
+            paths.push(WatchPath {
+                path: projects_dir,
+                watch_type: WatchType::Directory,
+                filter: Some("*.jsonl".to_string()),
+                recursive: true,
+            });
+        }
+        paths
+    }
+
+    fn active_sessions(&self, threshold_ms: u64) -> Vec<ActiveSession> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let threshold = now - threshold_ms as i64;
+        let mut sessions = Vec::new();
+
+        for dir in [Self::log_dir(), Self::projects_dir()] {
+            if !dir.exists() {
+                continue;
+            }
+            if let Ok(entries) = walkdir(&dir, true) {
+                for path in entries {
+                    if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                        continue;
+                    }
+                    if let Ok(stat) = std::fs::metadata(&path) {
+                        let mtime = stat.modified().unwrap_or(std::time::UNIX_EPOCH);
+                        let mtime_ms = mtime.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+                        if mtime_ms < threshold {
+                            continue;
+                        }
+                        let session_id = format!("claude:{}", Self::parse_session_id(&path));
+                        let (last_message, last_tool, _) = Self::read_last_jsonl_entry(&path).unwrap_or((None, None, mtime_ms));
+                        sessions.push(ActiveSession {
+                            session_id,
+                            provider: "claude".to_string(),
+                            agent_id: None,
+                            agent_type: "main".to_string(),
+                            model: "unknown".to_string(),
+                            status: "active".to_string(),
+                            last_activity: mtime_ms,
+                            project: path.parent().map(|p| p.to_string_lossy().to_string()),
+                            last_message,
+                            last_tool,
+                            last_tool_input: None,
+                            parent_session_id: None,
+                        });
+                    }
+                }
+            }
+        }
+        sessions
+    }
+
+    fn session_detail(&self, session_id: &str) -> Option<ActiveSession> {
+        // Extract path from session_id (format: "claude:<path>")
+        let path_str = session_id.strip_prefix("claude:")?;
+        let path = PathBuf::from(path_str);
+        let (last_message, last_tool, last_activity) = Self::read_last_jsonl_entry(&path).unwrap_or((None, None, 0));
+        Some(ActiveSession {
+            session_id: session_id.to_string(),
+            provider: "claude".to_string(),
+            agent_id: None,
+            agent_type: "main".to_string(),
+            model: "unknown".to_string(),
+            status: "active".to_string(),
+            last_activity,
+            project: path.parent().map(|p| p.to_string_lossy().to_string()),
+            last_message,
+            last_tool,
+            last_tool_input: None,
+            parent_session_id: None,
+        })
+    }
+}
+
+fn walkdir(dir: &PathBuf, recursive: bool) -> std::io::Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    if recursive {
+        walkdir_recursive(dir, &mut paths, 0, 10)?;
+    } else {
+        for entry in std::fs::read_dir(dir)? {
+            paths.push(entry?.path());
+        }
+    }
+    Ok(paths)
+}
+
+fn walkdir_recursive(dir: &PathBuf, paths: &mut Vec<PathBuf>, depth: usize, max_depth: usize) -> std::io::Result<()> {
+    if depth > max_depth {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            walkdir_recursive(&path, paths, depth + 1, max_depth)?;
+        } else {
+            paths.push(path);
+        }
+    }
+    Ok(())
+}
+```
+
+**Note:** The `walkdir_recursive` helper is needed because we can't use external crates beyond what we specified. Alternatively, use `notify::RecommendedWatcher` event-driven approach in Task 4.
+
+- [ ] **Step 3: Verify compilation**
+
+Run: `cd src/session_collector && cargo check`
+Expected: PASS (need to add `dirs` crate to Cargo.toml)
+
+Add `dirs = "5"` to session_collector Cargo.toml dependencies.
+
+Run: `cargo check` again
+Expected: PASS
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/session_collector/src/adapters/
+git commit -m "feat(collector): add claude adapter"
+```
+
+---
+
+## Task 4: Implement remaining adapters
+
+**Files:**
+- Create: `src/session_collector/src/adapters/openclaw.rs`
+- Create: `src/session_collector/src/adapters/copilot.rs`
+- Create: `src/session_collector/src/adapters/codex.rs`
+- Create: `src/session_collector/src/adapters/opencode.rs`
+- Create: `src/session_collector/src/adapters/gemini.rs`
+
+For each adapter, follow the pattern from claude.rs. Each adapter's `watch_paths()` returns paths where its session logs live:
+
+| Adapter | Watch paths |
+|---------|-------------|
+| openclaw | `~/.openclaw/logs/*.jsonl`, `~/.openclaw/projects/*/sessions/` |
+| copilot | `~/.github/copilot/*.jsonl` |
+| codex | `~/.codex/logs/*.jsonl` |
+| opencode | `~/.opencode/logs/*.jsonl` |
+| gemini | `~/.gemini/logs/*.jsonl` |
+
+Each adapter parses its specific JSONL format to extract `last_tool`, `last_message`, `last_activity`.
+
+- [ ] **Implement openclaw.rs** — similar to claude.rs but with openclaw's path structure
+
+- [ ] **Implement copilot.rs** — similar pattern
+
+- [ ] **Implement codex.rs** — similar pattern
+
+- [ ] **Implement opencode.rs** — similar pattern
+
+- [ ] **Implement gemini.rs** — similar pattern
+
+- [ ] **Verify all compile**
+
+Run: `cargo check`
+Expected: PASS
 
 - [ ] **Commit**
 
 ```bash
-git add search-backend/cass/tests/session_daemon.rs
-git commit -m "test(cass): add session-daemon integration test"
+git add src/session_collector/src/adapters/
+git commit -m "feat(collector): implement remaining adapters (openclaw, copilot, codex, opencode, gemini)"
+```
+
+---
+
+## Task 5: Implement collector's watcher (notify-based)
+
+**Files:**
+- Modify: `src/session_collector/src/main.rs`
+- Create: `src/session_collector/src/watcher.rs`
+- Create: `src/session_collector/src/collector.rs`
+
+- [ ] **Step 1: Create watcher.rs**
+
+```rust
+use notify::{RecommendedWatcher, RecursiveMode, Watcher, Config as NotifyConfig, Event, EventKind};
+use std::collections::HashSet;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::sync::mpsc;
+
+pub struct SessionWatcher {
+    watchers: Vec<RecommendedWatcher>,
+    dirty: Arc<Mutex<bool>>,
+    watch_paths: Arc<Mutex<HashSet<PathBuf>>>,
+}
+
+impl SessionWatcher {
+    pub fn new() -> Self {
+        Self {
+            watchers: Vec::new(),
+            dirty: Arc::new(Mutex::new(false)),
+            watch_paths: Arc::new(Mutex::new(HashSet::new())),
+        }
+    }
+
+    pub fn watch(&mut self, path: PathBuf, recursive: bool) -> anyhow::Result<()> {
+        let dirty = self.dirty.clone();
+        let wp = self.watch_paths.clone();
+        
+        let mut watcher = RecommendedWatcher::new(
+            move |res: Result<Event, notify::Error>| {
+                if let Ok(event) = res {
+                    match event.kind {
+                        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
+                            *dirty.lock().unwrap() = true;
+                        }
+                        _ => {}
+                    }
+                }
+            },
+            NotifyConfig::default().with_poll_interval(Duration::from_secs(1)),
+        )?;
+        
+        let mode = if recursive { RecursiveMode::Recursive } else { RecursiveMode::NonRecursive };
+        watcher.watch(&path, mode)?;
+        
+        self.watchers.push(watcher);
+        self.watch_paths.lock().unwrap().insert(path);
+        Ok(())
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        *self.dirty.lock().unwrap()
+    }
+
+    pub fn clear_dirty(&self) {
+        *self.dirty.lock().unwrap() = false;
+    }
+}
+```
+
+- [ ] **Step 2: Create collector.rs**
+
+```rust
+use crate::watcher::SessionWatcher;
+use crate::client::HubClient;
+use session_common::{ActiveSession, Snapshot, SessionAdapter};
+use sha1::{Sha1, Digest};
+use std::sync::Arc;
+use tokio::sync::mpsc;
+
+pub struct Collector {
+    adapters: Vec<Box<dyn SessionAdapter + Send + Sync>>,
+    watcher: SessionWatcher,
+    hub_client: HubClient,
+    collector_id: String,
+    last_fingerprint: Option<String>,
+    last_sessions: Vec<ActiveSession>,
+}
+
+impl Collector {
+    pub fn new(
+        adapters: Vec<Box<dyn SessionAdapter + Send + Sync>>,
+        hub_client: HubClient,
+        collector_id: String,
+    ) -> Self {
+        Self {
+            adapters,
+            watcher: SessionWatcher::new(),
+            hub_client,
+            collector_id,
+            last_fingerprint: None,
+            last_sessions: Vec::new(),
+        }
+    }
+
+    pub fn setup_watchers(&mut self) -> anyhow::Result<()> {
+        for adapter in &self.adapters {
+            if !adapter.is_available() {
+                continue;
+            }
+            for wp in adapter.watch_paths() {
+                self.watcher.watch(wp.path, wp.recursive)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn run(&mut self, flush_interval_ms: u64) -> anyhow::Result<()> {
+        loop {
+            tokio::time::sleep(Duration::from_millis(flush_interval_ms)).await;
+            self.flush_if_needed().await?;
+        }
+    }
+
+    pub async fn flush_if_needed(&mut self) -> anyhow::Result<()> {
+        let is_dirty = self.watcher.is_dirty();
+        if !is_dirty {
+            return Ok(());
+        }
+
+        let sessions = self.collect_sessions();
+        let fingerprint = self.compute_fingerprint(&sessions);
+
+        if fingerprint == self.last_fingerprint {
+            self.watcher.clear_dirty();
+            return Ok(());
+        }
+
+        let snapshot = Snapshot {
+            collector_id: self.collector_id.clone(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64,
+            fingerprint: fingerprint.clone(),
+            sessions: sessions.clone(),
+        };
+
+        self.hub_client.send_snapshot(snapshot).await?;
+        self.last_fingerprint = Some(fingerprint);
+        self.last_sessions = sessions;
+        self.watcher.clear_dirty();
+        Ok(())
+    }
+
+    fn collect_sessions(&self) -> Vec<ActiveSession> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let threshold = now - 120000; // ACTIVE_THRESHOLD_MS
+        let mut all_sessions = Vec::new();
+
+        for adapter in &self.adapters {
+            if !adapter.is_available() {
+                continue;
+            }
+            let sessions = adapter.active_sessions(120000);
+            for session in sessions {
+                if session.last_activity >= threshold {
+                    all_sessions.push(session);
+                }
+            }
+        }
+        all_sessions
+    }
+
+    fn compute_fingerprint(&self, sessions: &[ActiveSession]) -> String {
+        let json = serde_json::to_string(sessions).unwrap_or_default();
+        let mut hasher = Sha1::new();
+        hasher.update(json.as_bytes());
+        format!("{:x}", hasher.finalize())
+    }
+}
+```
+
+- [ ] **Step 3: Verify compilation**
+
+Run: `cd src/session_collector && cargo check`
+Expected: PASS
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/session_collector/src/watcher.rs src/session_collector/src/collector.rs
+git commit -m "feat(collector): implement watcher and collector core"
+```
+
+---
+
+## Task 6: Implement collector's WebSocket client
+
+**Files:**
+- Create: `src/session_collector/src/client.rs`
+
+- [ ] **Step 1: Create client.rs**
+
+```rust
+use session_common::{CollectorMessage, HubMessage, Snapshot};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
+use futures_util::{SinkExt, StreamExt};
+use url::Url;
+
+pub struct HubClient {
+    url: String,
+    token: String,
+}
+
+impl HubClient {
+    pub fn new(url: String, token: String) -> Self {
+        Self { url, token }
+    }
+
+    pub async fn connect(&self) -> anyhow::Result<()> {
+        let url_with_token = format!("{}?token={}", self.url, self.token);
+        let url = Url::parse(&url_with_token)?;
+        
+        let (ws_stream, _) = connect_async(url).await?;
+        let (mut write, mut read) = ws_stream.split();
+        
+        tracing::info!("Connected to hub");
+        
+        // Read acknowledgments in background
+        let mut read = read;
+        tokio::spawn(async move {
+            while let Some(msg) = read.next().await {
+                if let Ok(Message::Text(text)) = msg {
+                    if let Ok(hub_msg) = serde_json::from_str::<HubMessage>(&text) {
+                        match hub_msg {
+                            HubMessage::Ack { fingerprint } => {
+                                tracing::debug!("Hub acknowledged snapshot {}", fingerprint);
+                            }
+                            HubMessage::Error { message } => {
+                                tracing::error!("Hub error: {}", message);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    pub async fn send_snapshot(&self, snapshot: Snapshot) -> anyhow::Result<()> {
+        // Note: This is a simplified version. In practice, you'd want to store
+        // the write half and use it here. For now, reconnect per snapshot.
+        let url_with_token = format!("{}?token={}", self.url, self.token);
+        let url = Url::parse(&url_with_token)?;
+        
+        let (ws_stream, _) = connect_async(url).await?;
+        let (mut write, _read) = ws_stream.split();
+        
+        let msg = CollectorMessage::Snapshot {
+            collector_id: snapshot.collector_id,
+            timestamp: snapshot.timestamp,
+            fingerprint: snapshot.fingerprint,
+            sessions: snapshot.sessions,
+        };
+        
+        let text = serde_json::to_string(&msg)?;
+        write.send(Message::Text(text)).await?;
+        write.close().await?;
+        
+        Ok(())
+    }
+}
+```
+
+**Note:** This is a simplified client. The actual implementation should maintain a persistent connection. The reconnect logic will be added in Task 8.
+
+- [ ] **Step 2: Verify compilation**
+
+Run: `cargo check`
+Expected: PASS
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/session_collector/src/client.rs
+git commit -m "feat(collector): add WebSocket client to hub"
+```
+
+---
+
+## Task 7: Implement session_hub crate
+
+**Files:**
+- Create: `src/session_hub/Cargo.toml`
+- Create: `src/session_hub/src/main.rs`
+- Create: `src/session_hub/src/server.rs`
+- Create: `src/session_hub/src/state.rs`
+- Create: `src/session_hub/src/auth.rs`
+
+- [ ] **Step 1: Create Cargo.toml**
+
+```toml
+[package]
+name = "session_hub"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "session-hub"
+path = "src/main.rs"
+
+[dependencies]
+session_common = { path = "../session_common" }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.21"
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+```
+
+- [ ] **Step 2: Create auth.rs**
+
+```rust
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+#[derive(Clone)]
+pub struct Auth {
+    token: String,
+    connected_collectors: Arc<RwLock<HashMap<String, std::time::Instant>>>,
+}
+
+impl Auth {
+    pub fn new(token: String) -> Self {
+        Self {
+            token,
+            connected_collectors: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub fn validate_token(&self, token: &str) -> bool {
+        self.token == token
+    }
+
+    pub async fn register_collector(&self, collector_id: String) {
+        self.connected_collectors.write().await.insert(
+            collector_id,
+            std::time::Instant::now(),
+        );
+    }
+
+    pub async fn heartbeat_collector(&self, collector_id: &str) {
+        self.connected_collectors.write().await.insert(
+            collector_id.to_string(),
+            std::time::Instant::now(),
+        );
+    }
+
+    pub async fn cleanup_stale_collectors(&self, timeout_secs: u64) -> Vec<String> {
+        let now = std::time::Instant::now();
+        let mut stale = Vec::new();
+        let mut write = self.connected_collectors.write().await;
+        
+        write.retain(|id, last_seen| {
+            if now.duration_since(*last_seen).as_secs() > timeout_secs {
+                stale.push(id.clone());
+                false
+            } else {
+                true
+            }
+        });
+        stale
+    }
+}
+```
+
+- [ ] **Step 3: Create state.rs**
+
+```rust
+use session_common::ActiveSession;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+#[derive(Clone)]
+pub struct HubState {
+    // collector_id -> snapshot
+    collector_snapshots: Arc<RwLock<HashMap<String, session_common::Snapshot>>>,
+    // session_id -> merged session
+    merged_sessions: Arc<RwLock<HashMap<String, ActiveSession>>>,
+}
+
+impl HubState {
+    pub fn new() -> Self {
+        Self {
+            collector_snapshots: Arc::new(RwLock::new(HashMap::new())),
+            merged_sessions: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub async fn apply_snapshot(&self, snapshot: session_common::Snapshot) -> SessionDiff {
+        let mut old_session_ids = self.merged_sessions.read().await.keys().cloned().collect::<HashSet<_>>();
+        
+        // Update collector snapshot
+        self.collector_snapshots.write().await.insert(
+            snapshot.collector_id.clone(),
+            snapshot.clone(),
+        );
+        
+        // Merge sessions: latest-wins per sessionId
+        let mut write = self.merged_sessions.write().await;
+        for session in snapshot.sessions {
+            let should_update = match write.get(&session.session_id) {
+                Some(existing) => session.last_activity > existing.last_activity,
+                None => true,
+            };
+            if should_update {
+                write.insert(session.session_id.clone(), session);
+            }
+        }
+        
+        let new_session_ids = write.keys().cloned().collect::<HashSet<_>>();
+        
+        let started: Vec<_> = new_session_ids.difference(&old_session_ids).cloned().collect();
+        let ended: Vec<_> = old_session_ids.difference(&new_session_ids).cloned().collect();
+        let existing: Vec<_> = old_session_ids.intersection(&new_session_ids).cloned().collect();
+        
+        SessionDiff { started, ended, existing }
+    }
+
+    pub async fn get_all_sessions(&self) -> Vec<ActiveSession> {
+        self.merged_sessions.read().await.values().cloned().collect()
+    }
+
+    pub async fn remove_collector(&self, collector_id: &str) {
+        // Remove collector's snapshots
+        if let Some(snapshot) = self.collector_snapshots.write().await.remove(collector_id) {
+            // Remove sessions only from this collector
+            let mut write = self.merged_sessions.write().await;
+            let session_ids: Vec<_> = write.keys()
+                .filter(|id| {
+                    // Check if this session came from the removed collector
+                    // This requires tracking source, simplified here
+                    false
+                })
+                .cloned()
+                .collect();
+            for id in session_ids {
+                write.remove(&id);
+            }
+        }
+    }
+}
+
+pub struct SessionDiff {
+    pub started: Vec<String>,
+    pub ended: Vec<String>,
+    pub existing: Vec<String>,
+}
+```
+
+- [ ] **Step 4: Create server.rs**
+
+```rust
+use crate::auth::Auth;
+use crate::state::HubState;
+use session_common::{CollectorMessage, HubMessage, ActiveSession};
+use tokio_tungstenite::{accept_async, tungstenite::{Message, Error}};
+use futures_util::{SinkExt, StreamExt};
+use std::sync::Arc;
+use tokio::net::TcpListener;
+
+pub struct HubServer {
+    state: HubState,
+    auth: Auth,
+    collector_port: u16,
+    frontend_port: u16,
+}
+
+impl HubServer {
+    pub fn new(
+        auth_token: String,
+        collector_port: u16,
+        frontend_port: u16,
+    ) -> Self {
+        Self {
+            state: HubState::new(),
+            auth: Auth::new(auth_token),
+            collector_port,
+            frontend_port,
+        }
+    }
+
+    pub async fn run(&self) -> anyhow::Result<()> {
+        let collector_addr = format!("0.0.0.0:{}", self.collector_port);
+        let collector_listener = TcpListener::bind(&collector_addr).await?;
+        tracing::info!("Collector WebSocket server listening on {}", collector_addr);
+        
+        let frontend_addr = format!("0.0.0.0:{}", self.frontend_port);
+        let frontend_listener = TcpListener::bind(&frontend_addr).await?;
+        tracing::info!("Frontend WebSocket server listening on {}", frontend_addr);
+        
+        let state = self.state.clone();
+        let auth = self.auth.clone();
+        
+        // Collector connections handler
+        let collector_state = self.state.clone();
+        let collector_auth = self.auth.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Ok((stream, addr)) = collector_listener.accept().await {
+                    let state = collector_state.clone();
+                    let auth = collector_auth.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_collector_connection(stream, addr, state, auth).await {
+                            tracing::warn!("Collector connection error: {}", e);
+                        }
+                    });
+                }
+            }
+        });
+        
+        // Frontend connections handler
+        let frontend_state = self.state.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Ok((stream, addr)) = frontend_listener.accept().await {
+                    let state = frontend_state.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_frontend_connection(stream, addr, state).await {
+                            tracing::warn!("Frontend connection error: {}", e);
+                        }
+                    });
+                }
+            }
+        });
+        
+        // Cleanup task for stale collectors
+        let cleanup_state = self.state.clone();
+        let cleanup_auth = self.auth.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                let stale = cleanup_auth.cleanup_stale_collectors(60).await;
+                for collector_id in stale {
+                    cleanup_state.remove_collector(&collector_id).await;
+                    tracing::info!("Removed stale collector: {}", collector_id);
+                }
+            }
+        });
+        
+        // Keep main future alive
+        tokio::signal::ctrl_c().await?;
+        Ok(())
+    }
+}
+
+async fn handle_collector_connection(
+    stream: tokio::net::TcpStream,
+    addr: std::net::SocketAddr,
+    state: HubState,
+    auth: Auth,
+) -> anyhow::Result<()> {
+    let ws_stream = accept_async(stream).await?;
+    let (mut write, mut read) = ws_stream.split();
+    
+    // Handle incoming messages
+    while let Some(msg) = read.next().await {
+        let msg = msg?;
+        
+        match msg {
+            Message::Text(text) => {
+                if let Ok(collector_msg) = serde_json::from_str::<CollectorMessage>(&text) {
+                    match collector_msg {
+                        CollectorMessage::Snapshot { collector_id, timestamp, fingerprint, sessions } => {
+                            let snapshot = session_common::Snapshot {
+                                collector_id: collector_id.clone(),
+                                timestamp,
+                                fingerprint,
+                                sessions,
+                            };
+                            
+                            let diff = state.apply_snapshot(snapshot).await;
+                            let sessions = state.get_all_sessions().await;
+                            
+                            // Send ack
+                            let ack = HubMessage::Ack { fingerprint: snapshot.fingerprint };
+                            write.send(Message::Text(serde_json::to_string(&ack)?)).await?;
+                            
+                            // Broadcast to all frontends (TODO: track frontend connections)
+                            tracing::debug!("Applied snapshot from {}: {} started, {} ended", 
+                                collector_id, diff.started.len(), diff.ended.len());
+                        }
+                    }
+                }
+            }
+            Message::Close(_) => break,
+            _ => {}
+        }
+    }
+    
+    Ok(())
+}
+
+async fn handle_frontend_connection(
+    stream: tokio::net::TcpStream,
+    addr: std::net::SocketAddr,
+    state: HubState,
+) -> anyhow::Result<()> {
+    let ws_stream = accept_async(stream).await?;
+    let (mut write, _read) = ws_stream.split();
+    
+    // Send initial state sync
+    let sessions = state.get_all_sessions().await;
+    let sync = HubMessage::StateSync { sessions };
+    write.send(Message::Text(serde_json::to_string(&sync)?)).await?;
+    
+    // Keep connection alive (frontends don't send messages, just receive)
+    // In a real implementation, you'd want to track these connections for broadcasting
+    tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+    
+    Ok(())
+}
+```
+
+- [ ] **Step 5: Create main.rs**
+
+```rust
+mod auth;
+mod server;
+mod state;
+
+use server::HubServer;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
+    let auth_token = std::env::var("HUB_AUTH_TOKEN")
+        .expect("HUB_AUTH_TOKEN must be set");
+    let collector_port: u16 = std::env::var("HUB_PORT")
+        .unwrap_or_else(|_| "8080".to_string())
+        .parse()
+        .expect("HUB_PORT must be a valid port");
+    let frontend_port: u16 = std::env::var("HUB_FRONTEND_PORT")
+        .unwrap_or_else(|_| "8081".to_string())
+        .parse()
+        .expect("HUB_FRONTEND_PORT must be a valid port");
+
+    let server = HubServer::new(auth_token, collector_port, frontend_port);
+    server.run().await?;
+
+    Ok(())
+}
+```
+
+- [ ] **Step 6: Verify compilation**
+
+Run: `cd src/session_hub && cargo check`
+Expected: PASS
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/session_hub/
+git commit -m "feat(session_hub): add hub service with WebSocket server and state management"
+```
+
+---
+
+## Task 8: Wire up collector main.rs with full flow
+
+**Files:**
+- Modify: `src/session_collector/src/main.rs`
+
+- [ ] **Step 1: Update main.rs**
+
+```rust
+mod adapters;
+mod client;
+mod collector;
+mod watcher;
+
+use adapters::{ClaudeAdapter, OpenClawAdapter, CopilotAdapter, CodexAdapter, OpenCodeAdapter, GeminiAdapter};
+use client::HubClient;
+use collector::Collector;
+use session_common::SessionAdapter;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use std::sync::Arc;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
+    let hub_url = std::env::var("HUB_URL")
+        .unwrap_or_else(|_| "ws://localhost:8080".to_string());
+    let auth_token = std::env::var("HUB_AUTH_TOKEN")
+        .expect("HUB_AUTH_TOKEN must be set");
+    let collector_id = std::env::var("COLLECTOR_ID")
+        .unwrap_or_else(|| hostname::get()
+            .map(|h| h.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "unknown".to_string()));
+    let flush_interval_ms: u64 = std::env::var("FLUSH_INTERVAL_MS")
+        .unwrap_or_else(|_| "2000".to_string())
+        .parse()
+        .unwrap_or(2000);
+
+    tracing::info!("Starting session-collector {} -> {}", collector_id, hub_url);
+
+    // Build adapters
+    let adapters: Vec<Box<dyn SessionAdapter + Send + Sync>> = vec![
+        Box::new(ClaudeAdapter::new()),
+        Box::new(OpenClawAdapter::new()),
+        Box::new(CopilotAdapter::new()),
+        Box::new(CodexAdapter::new()),
+        Box::new(OpenCodeAdapter::new()),
+        Box::new(GeminiAdapter::new()),
+    ];
+
+    let hub_client = HubClient::new(hub_url, auth_token);
+    let mut collector = Collector::new(adapters, hub_client, collector_id);
+    
+    collector.setup_watchers()?;
+    collector.run(flush_interval_ms).await?;
+
+    Ok(())
+}
+```
+
+- [ ] **Step 2: Verify compilation**
+
+Run: `cd src/session_collector && cargo check`
+Expected: PASS
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/session_collector/src/main.rs
+git commit -m "feat(collector): wire up main loop with adapters and hub client"
+```
+
+---
+
+## Task 9: Add reconnection logic to collector client
+
+**Files:**
+- Modify: `src/session_collector/src/client.rs`
+
+The current client implementation reconnects per snapshot. Add proper reconnection with exponential backoff.
+
+- [ ] **Step 1: Implement persistent connection with retry**
+
+Replace the HubClient with one that maintains a persistent connection and handles reconnection:
+
+```rust
+use session_common::{CollectorMessage, HubMessage, Snapshot};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
+use futures_util::{SinkExt, StreamExt};
+use url::Url;
+use tokio::sync::{mpsc, RwLock};
+use std::sync::Arc;
+use std::time::Duration;
+
+#[derive(Clone)]
+pub struct HubClient {
+    url: String,
+    token: String,
+    state: Arc<RwLock<HubClientState>>,
+}
+
+struct HubClientState {
+    connected: bool,
+    retry_count: u32,
+    max_retries: u32,
+}
+
+impl HubClient {
+    pub fn new(url: String, token: String) -> Self {
+        Self {
+            url,
+            token,
+            state: Arc::new(RwLock::new(HubClientState {
+                connected: false,
+                retry_count: 0,
+                max_retries: 10,
+            })),
+        }
+    }
+
+    pub async fn connect(&self) -> anyhow::Result<()> {
+        loop {
+            let url_with_token = format!("{}?token={}", self.url, self.token);
+            match connect_async(Url::parse(&url_with_token)?).await {
+                Ok((ws_stream, _)) => {
+                    let (mut write, mut read) = ws_stream.split();
+                    {
+                        let mut state = self.state.write().await;
+                        state.connected = true;
+                        state.retry_count = 0;
+                    }
+                    tracing::info!("Connected to hub");
+                    
+                    // Handle incoming messages
+                    let mut read = read;
+                    tokio::spawn(async move {
+                        while let Some(msg) = read.next().await {
+                            if let Ok(Message::Text(text)) = msg {
+                                if let Ok(hub_msg) = serde_json::from_str::<HubMessage>(&text) {
+                                    match hub_msg {
+                                        HubMessage::Ack { .. } => {}
+                                        HubMessage::Error { message } => {
+                                            tracing::error!("Hub error: {}", message);
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    
+                    return Ok(());
+                }
+                Err(e) => {
+                    let retry_count = {
+                        let mut state = self.state.write().await;
+                        state.retry_count += 1;
+                        state.retry_count
+                    };
+                    
+                    let backoff = Duration::from_secs(2u64.pow(retry_count.min(5))).min(Duration::from_secs(30));
+                    tracing::warn!("Failed to connect to hub (attempt {}), retrying in {:?}: {}", 
+                        retry_count, backoff, e);
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
+    }
+
+    pub async fn send_snapshot(&self, snapshot: Snapshot) -> anyhow::Result<()> {
+        let url_with_token = format!("{}?token={}", self.url, self.token);
+        let (ws_stream, _) = connect_async(Url::parse(&url_with_token)?).await?;
+        let (mut write, _read) = ws_stream.split();
+        
+        let msg = CollectorMessage::Snapshot {
+            collector_id: snapshot.collector_id,
+            timestamp: snapshot.timestamp,
+            fingerprint: snapshot.fingerprint,
+            sessions: snapshot.sessions,
+        };
+        
+        let text = serde_json::to_string(&msg)?;
+        write.send(Message::Text(text)).await?;
+        write.close().await?;
+        
+        Ok(())
+    }
+}
+```
+
+- [ ] **Step 2: Verify compilation**
+
+Run: `cargo check`
+Expected: PASS
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/session_collector/src/client.rs
+git commit -m "feat(collector): add reconnection logic with exponential backoff"
+```
+
+---
+
+## Task 10: Integration testing
+
+**Files:**
+- Create: `src/session_hub/tests/integration.rs`
+- Create: `src/session_collector/tests/integration.rs`
+
+- [ ] **Step 1: Write hub integration test**
+
+```rust
+use session_hub::{HubServer, HubState};
+use session_common::{Snapshot, ActiveSession};
+
+#[tokio::test]
+async fn test_snapshot_merge() {
+    let state = HubState::new();
+    
+    let snapshot1 = Snapshot {
+        collector_id: "machine-1".to_string(),
+        timestamp: 1000,
+        fingerprint: "abc".to_string(),
+        sessions: vec![
+            ActiveSession {
+                session_id: "s1".to_string(),
+                provider: "claude".to_string(),
+                agent_id: None,
+                agent_type: "main".to_string(),
+                model: "opus".to_string(),
+                status: "active".to_string(),
+                last_activity: 1000,
+                project: None,
+                last_message: None,
+                last_tool: None,
+                last_tool_input: None,
+                parent_session_id: None,
+            },
+        ],
+    };
+    
+    state.apply_snapshot(snapshot1).await;
+    let sessions = state.get_all_sessions().await;
+    assert_eq!(sessions.len(), 1);
+    
+    // Snapshot from another collector with same session (newer activity wins)
+    let snapshot2 = Snapshot {
+        collector_id: "machine-2".to_string(),
+        timestamp: 2000,
+        fingerprint: "def".to_string(),
+        sessions: vec![
+            ActiveSession {
+                session_id: "s1".to_string(),
+                provider: "claude".to_string(),
+                agent_id: None,
+                agent_type: "main".to_string(),
+                model: "opus".to_string(),
+                status: "active".to_string(),
+                last_activity: 2000, // newer
+                project: None,
+                last_message: Some("newer".to_string()),
+                last_tool: None,
+                last_tool_input: None,
+                parent_session_id: None,
+            },
+        ],
+    };
+    
+    state.apply_snapshot(snapshot2).await;
+    let sessions = state.get_all_sessions().await;
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].last_activity, 2000);
+    assert_eq!(sessions[0].last_message.as_deref(), Some("newer"));
+}
+
+#[tokio::test]
+async fn test_latest_wins() {
+    let state = HubState::new();
+    
+    let s1 = ActiveSession {
+        session_id: "s1".to_string(),
+        provider: "claude".to_string(),
+        agent_id: None,
+        agent_type: "main".to_string(),
+        model: "opus".to_string(),
+        status: "active".to_string(),
+        last_activity: 1000,
+        project: None,
+        last_message: None,
+        last_tool: None,
+        last_tool_input: None,
+        parent_session_id: None,
+    };
+    
+    state.apply_snapshot(Snapshot {
+        collector_id: "c1".to_string(),
+        timestamp: 1000,
+        fingerprint: "f1".to_string(),
+        sessions: vec![s1],
+    }).await;
+    
+    // Same session from different collector, older timestamp
+    let s1_old = ActiveSession {
+        session_id: "s1".to_string(),
+        provider: "claude".to_string(),
+        agent_id: None,
+        agent_type: "main".to_string(),
+        model: "opus".to_string(),
+        status: "active".to_string(),
+        last_activity: 500, // older
+        project: None,
+        last_message: Some("older".to_string()),
+        last_tool: None,
+        last_tool_input: None,
+        parent_session_id: None,
+    };
+    
+    state.apply_snapshot(Snapshot {
+        collector_id: "c2".to_string(),
+        timestamp: 2000,
+        fingerprint: "f2".to_string(),
+        sessions: vec![s1_old],
+    }).await;
+    
+    let sessions = state.get_all_sessions().await;
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].last_activity, 1000); // newer one wins
+}
+```
+
+- [ ] **Step 2: Verify tests pass**
+
+Run: `cd src/session_hub && cargo test`
+Expected: PASS
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/session_hub/tests/
+git commit -m "test(hub): add integration tests for snapshot merge and latest-wins"
 ```
 
 ---
@@ -540,8 +1587,20 @@ git commit -m "test(cass): add session-daemon integration test"
 ## Verification Checklist
 
 After all tasks:
-- `cargo check --features connectors` in franken_agent_detection — PASS
-- `cargo check` in cass — PASS
-- `cargo test --features connectors` in franken_agent_detection — PASS
-- `cargo test` in cass — PASS
-- Manual test: `cass session-daemon --port 8080` and connect with `wscat -c ws://localhost:8080` or similar
+- `cargo check` in session_common — PASS
+- `cargo check` in session_collector — PASS
+- `cargo check` in session_hub — PASS
+- `cargo test` in session_hub — PASS
+- Manual test:
+  1. `session-hub` (with `HUB_AUTH_TOKEN=secret`)
+  2. `session-collector` (with `HUB_AUTH_TOKEN=secret`)
+  3. Connect to `ws://localhost:8081/sessions` with WebSocket client
+  4. Verify session events received
+
+---
+
+## Open Issues
+
+- Frontend broadcast: Hub needs to track frontend connections and broadcast state changes. Currently frontends get initial StateSync but not updates.
+- Auth for frontend connections: Currently open, may want token auth.
+- Collector heartbeat: Hub should expect periodic pings from collectors to detect disconnection.
