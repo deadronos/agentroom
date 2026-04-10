@@ -51,6 +51,21 @@ impl HubState {
 
     pub async fn remove_collector(&self, collector_id: &str) {
         self.collector_snapshots.write().await.remove(collector_id);
+        
+        let remaining: Vec<_> = self.collector_snapshots.read().await.values().cloned().collect();
+        let mut write = self.merged_sessions.write().await;
+        write.clear();
+        for snapshot in remaining {
+            for session in snapshot.sessions {
+                let should_update = match write.get(&session.session_id) {
+                    Some(existing) => session.last_activity > existing.last_activity,
+                    None => true,
+                };
+                if should_update {
+                    write.insert(session.session_id.clone(), session);
+                }
+            }
+        }
     }
 }
 
