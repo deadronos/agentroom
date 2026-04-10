@@ -1,25 +1,8 @@
 use session_common::{ActiveSession, Snapshot};
 use sha1::{Sha1, Digest};
-use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
 
-#[derive(Clone)]
-pub struct HubClient {
-    url: String,
-    sender: mpsc::Sender<Snapshot>,
-}
-
-impl HubClient {
-    pub fn new(url: String, sender: mpsc::Sender<Snapshot>) -> Self {
-        Self { url, sender }
-    }
-
-    pub async fn send_snapshot(&self, snapshot: Snapshot) -> anyhow::Result<()> {
-        self.sender.send(snapshot).await?;
-        Ok(())
-    }
-}
+use crate::client::HubClient;
 
 pub struct Collector {
     adapters: Vec<Box<dyn session_common::SessionAdapter + Send + Sync>>,
