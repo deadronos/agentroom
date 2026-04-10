@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[doc = "Represents an active agent session being tracked by the collector."]
 pub struct ActiveSession {
     pub session_id: String,
     pub provider: String,
@@ -17,6 +18,7 @@ pub struct ActiveSession {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[doc = "A snapshot of all active sessions at a point in time, sent from collector to hub."]
 pub struct Snapshot {
     pub collector_id: String,
     pub timestamp: i64,
@@ -26,6 +28,7 @@ pub struct Snapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
+#[doc = "Events emitted by the collector about session lifecycle."]
 pub enum SessionEvent {
     SessionStarted {
         session_id: String,
@@ -54,6 +57,7 @@ pub enum SessionEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
+#[doc = "Messages sent from collector to hub."]
 pub enum CollectorMessage {
     Snapshot {
         collector_id: String,
@@ -65,6 +69,7 @@ pub enum CollectorMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
+#[doc = "Messages sent from hub to collector (commands) or collector to hub (events)."]
 pub enum HubMessage {
     Ack {
         fingerprint: String,
