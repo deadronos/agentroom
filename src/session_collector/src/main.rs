@@ -1,6 +1,7 @@
 mod adapters;
 mod watcher;
 mod collector;
+mod client;
 
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
