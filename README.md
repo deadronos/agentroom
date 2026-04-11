@@ -66,6 +66,16 @@ cargo build --package session_collector
 
 Or build all at once from the workspace root if configured.
 
+### Environment Setup
+
+Copy the example env file and modify values as needed:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` to set your `HUB_AUTH_TOKEN` and other values. The hub and collector will automatically load variables from `.env` when run from the repo root.
+
 ### Run the System
 
 **Terminal 1 — Start the Hub:**
