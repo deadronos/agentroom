@@ -16,7 +16,7 @@ export function hubSessionToSession(hub: HubActiveSession): Session {
     workspace: hub.project,
     title,
     sourcePath: hub.session_id,
-    startedAt: null,
+    startedAt: hub.last_activity,
     endedAt: null,
     messageCount: undefined,
     score: undefined,
