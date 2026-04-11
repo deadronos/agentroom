@@ -32,7 +32,7 @@ impl CopilotAdapter {
         let ts = json.get("ts").and_then(|v| v.as_i64()).unwrap_or(0);
         let tool = json.get("name").and_then(|v| v.as_str()).map(String::from);
         let text = json.get("text").and_then(|v| v.as_str()).map(String::from);
-        Some((ts, tool.clone().or(text), tool))
+        Some((ts, text.or(tool.clone()), tool))
     }
 
     fn read_last_jsonl_entry(path: &PathBuf) -> Option<(Option<String>, Option<String>, i64)> {
