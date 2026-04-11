@@ -18,11 +18,7 @@ interface Props {
   onFocusProject: (workspace: string | null) => void;
 }
 
-const AGENT_ICONS: Record<string, string> = {
-  "claude-code": "C",
-  codex: "X",
-  gemini: "G",
-};
+// Agent icons are now CSS-based via .agent-icon-{agent} classes
 
 function formatTime(ts: number | null): string {
   if (!ts) return "";
@@ -61,8 +57,8 @@ function SessionCard({
       data-testid={`session-card-${session.id}`}
       onClick={() => onSelect(session)}
     >
-      <span className="agent-icon">
-        {AGENT_ICONS[session.agent] || session.agent[0]?.toUpperCase() || "?"}
+      <span className={`agent-icon agent-icon-${session.agent}`}>
+        {session.agent[0]?.toUpperCase() || "?"}
       </span>
       <div className="session-info">
         <div className="session-title">
@@ -72,7 +68,7 @@ function SessionCard({
               <span className="session-title-sub">{sessionTitle(session)}</span>
             </>
           ) : (
-            sessionTitle(session)
+            session.snippet?.slice(0, 80) || session.id
           )}
         </div>
         <div className="session-meta">
@@ -83,6 +79,7 @@ function SessionCard({
             </span>
           )}
           <span className="session-time">{formatTime(session.startedAt)}</span>
+          <span className={`status-dot ${session.endedAt == null ? 'active' : 'ended'}`} title={session.endedAt == null ? 'active' : 'ended'} />
           {session.score != null && (
             <span className="session-score">{session.score.toFixed(2)}</span>
           )}
