@@ -232,11 +232,6 @@ impl SessionAdapter for ClaudeAdapter {
 
         // Step 2: For each session, check file mtime + history timestamp >= threshold
         for (session_id, entry) in &history_entries {
-            // Skip if history timestamp is too old (entry.timestamp is in milliseconds, threshold_secs is in seconds)
-            if entry.timestamp < threshold_secs * 1000 {
-                continue;
-            }
-
             // Build encoded project path to find session file
             let encoded_project = Self::encode_project_path(&entry.project);
             let project_session_dir = self.find_project_session_dir(&encoded_project);
@@ -265,8 +260,9 @@ impl SessionAdapter for ClaudeAdapter {
                 })
                 .unwrap_or(entry.timestamp);
 
-            // Skip if file mtime is too old
-            if mtime_ms < threshold_secs * 1000 {
+            // Skip if BOTH history timestamp AND file mtime are too old
+            // entry.timestamp = when session started, mtime_ms = when session was last active
+            if entry.timestamp < threshold_secs * 1000 && mtime_ms < threshold_secs * 1000 {
                 continue;
             }
 

@@ -79,7 +79,7 @@ impl Collector {
     }
 
     fn collect_sessions(&self) -> Vec<ActiveSession> {
-        let threshold_ms = 120000u64; // 2 minutes
+        let threshold_ms = 300000u64; // 5 minutes
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

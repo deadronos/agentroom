@@ -35,12 +35,12 @@ impl HubState {
 
     pub async fn apply_snapshot(&self, snapshot: session_common::Snapshot) -> SessionDiff {
         let old_session_ids = self.merged_sessions.read().await.keys().cloned().collect::<HashSet<_>>();
-        
+
         self.collector_snapshots.write().await.insert(
             snapshot.collector_id.clone(),
             snapshot.clone(),
         );
-        
+
         let mut write = self.merged_sessions.write().await;
         for session in snapshot.sessions {
             let should_update = match write.get(&session.session_id) {
@@ -51,13 +51,44 @@ impl HubState {
                 write.insert(session.session_id.clone(), session);
             }
         }
-        
+
         let new_session_ids = write.keys().cloned().collect::<HashSet<_>>();
-        
+
         let started: Vec<_> = new_session_ids.difference(&old_session_ids).cloned().collect();
         let ended: Vec<_> = old_session_ids.difference(&new_session_ids).cloned().collect();
         let existing: Vec<_> = old_session_ids.intersection(&new_session_ids).cloned().collect();
-        
+
+        // Broadcast session_started events for new sessions
+        for session_id in &started {
+            if let Some(session) = write.get(session_id) {
+                let msg = HubMessage::SessionStarted {
+                    session_id: session.session_id.clone(),
+                    provider: session.provider.clone(),
+                    project: session.project.clone(),
+                    model: session.model.clone(),
+                    timestamp: session.last_activity,
+                    last_tool: session.last_tool.clone(),
+                    last_message: session.last_message.clone(),
+                    agent_id: session.agent_id.clone(),
+                    agent_type: session.agent_type.clone(),
+                };
+                let _ = self.frontend_broadcast.send(msg);
+            }
+        }
+
+        // Broadcast session_ended events for ended sessions
+        for session_id in &ended {
+            let msg = HubMessage::SessionEnded {
+                session_id: session_id.clone(),
+                provider: "unknown".to_string(),
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as i64,
+            };
+            let _ = self.frontend_broadcast.send(msg);
+        }
+
         SessionDiff { started, ended, existing }
     }
 
