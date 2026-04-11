@@ -69,6 +69,13 @@ impl CodexAdapter {
                     }
                 }
             }
+            if entry.entry_type == "event_msg" {
+                if let Some(model) = entry.payload.get("model") {
+                    if let Some(s) = model.as_str() {
+                        return s.to_string();
+                    }
+                }
+            }
         }
         "unknown".to_string()
     }
