@@ -63,7 +63,10 @@ export class HubClient {
 
     this.ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data) as HubMessage;
+        const raw = event.data;
+        console.warn('[HubClient] Raw WS message:', typeof raw === 'string' ? raw.slice(0, 200) : raw);
+        const msg = JSON.parse(raw) as HubMessage;
+        console.warn('[HubClient] Parsed msg type:', msg.type, '| has sessions:', 'sessions' in msg, '| sessions value:', (msg as Record<string, unknown>)['sessions']);
         this.dispatch(msg);
       } catch (err) {
         console.warn('[HubClient] Failed to parse message:', err);
