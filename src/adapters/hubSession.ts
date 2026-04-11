@@ -25,7 +25,7 @@ export function hubSessionToSession(hub: HubActiveSession): Session {
   };
 }
 
-function normalizeProvider(provider: string): string {
+export function normalizeProvider(provider: string): string {
   // Map hub provider names to existing agent names
   const map: Record<string, string> = {
     claude: 'claude-code',

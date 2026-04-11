@@ -17,7 +17,7 @@ import { TokenPanel } from './components/TokenPanel.js'
 import { getAllCategories, loadAllTags } from './services/tags.js'
 import type { Session, SessionTag, HubActiveSession } from './types.js'
 import { getHubClient } from './services/hub.js'
-import { hubSessionToSession } from './adapters/hubSession.js'
+import { hubSessionToSession, normalizeProvider } from './adapters/hubSession.js'
 
 type ViewMode = 'grouped' | 'flat'
 type MainView = 'office' | 'sessions'
@@ -161,7 +161,7 @@ function App() {
   const availableProviders = useMemo(() => {
     const set = new Set<string>()
     for (const s of hubSessions) {
-      set.add(s.provider)
+      set.add(normalizeProvider(s.provider))
     }
     return Array.from(set).sort()
   }, [hubSessions])
