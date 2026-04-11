@@ -1,19 +1,32 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import path from "path";
 
-const host = process.env.TAURI_DEV_HOST;
+const tauriDevHost = process.env.TAURI_DEV_HOST;
+const isStandalone = !tauriDevHost;
 
 export default defineConfig(async () => ({
   plugins: [react()],
   clearScreen: false,
+  root: isStandalone ? "." : ".",
+  base: "./",
+  build: {
+    outDir: "dist",
+    target: "esnext",
+  },
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
   server: {
-    port: 1420,
+    port: isStandalone ? 5173 : 1420,
     strictPort: true,
-    host: host || false,
-    hmr: host
+    host: tauriDevHost || false,
+    hmr: tauriDevHost
       ? {
           protocol: "ws",
-          host,
+          host: tauriDevHost,
           port: 1421,
         }
       : undefined,
