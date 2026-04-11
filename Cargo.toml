@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "src/session_common",
+    "src/session_hub",
+    "src/session_collector",
+]
+resolver = "2"
