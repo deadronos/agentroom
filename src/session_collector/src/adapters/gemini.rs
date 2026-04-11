@@ -384,39 +384,63 @@ impl SessionAdapter for GeminiAdapter {
     }
 
     fn session_detail(&self, session_id: &str) -> Option<ActiveSession> {
-        let path_str = session_id.strip_prefix("gemini:")?;
-        let path = PathBuf::from(path_str);
-        if !path.exists() {
+        // session_id is "gemini:{session_identifier}" where session_identifier is the part
+        // without the "session-" prefix (e.g., "gemini:abc123" from "session-abc123.json")
+        let session_ident = session_id.strip_prefix("gemini:")?;
+
+        // Search for the session file in ~/.gemini/tmp/*/chats/session-{session_ident}.json
+        let tmp_dir = Self::tmp_dir();
+        if !tmp_dir.is_dir() {
             return None;
         }
-        parse_session(&path).map(|(model, last_tool, last_tool_input, last_message, last_activity)| {
-            let session_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-            let session_id_from_file = session_stem.strip_prefix("session-").unwrap_or(session_stem);
-            let full_session_id = format!("gemini:{}", session_id_from_file);
 
-            let project_hash = path.ancestors().nth(2)
-                .and_then(|p| p.file_name())
-                .and_then(|n| n.to_str())
-                .map(String::from);
+        let target_filename = format!("session-{}.json", session_ident);
 
-            let project = project_hash.and_then(|h| resolve_project_path(&h));
-
-            ActiveSession {
-                session_id: full_session_id,
-                provider: "gemini".to_string(),
-                agent_id: None,
-                agent_type: "main".to_string(),
-                model,
-                status: "active".to_string(),
-                last_activity,
-                project,
-                last_message,
-                last_tool,
-                last_tool_input,
-                parent_session_id: None,
+        if let Ok(entries) = std::fs::read_dir(&tmp_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let project_dir = entry.path();
+                if project_dir.is_dir() {
+                    let chats_dir = project_dir.join("chats");
+                    let session_path = chats_dir.join(&target_filename);
+                    if session_path.is_file() {
+                        return session_detail_from_path(&session_path);
+                    }
+                }
             }
-        })
+        }
+
+        None
     }
+}
+
+fn session_detail_from_path(path: &PathBuf) -> Option<ActiveSession> {
+    parse_session(path).map(|(model, last_tool, last_tool_input, last_message, last_activity)| {
+        let session_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        let session_id_from_file = session_stem.strip_prefix("session-").unwrap_or(session_stem);
+        let full_session_id = format!("gemini:{}", session_id_from_file);
+
+        let project_hash = path.ancestors().nth(2)
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .map(String::from);
+
+        let project = project_hash.and_then(|h| resolve_project_path(&h));
+
+        ActiveSession {
+            session_id: full_session_id,
+            provider: "gemini".to_string(),
+            agent_id: None,
+            agent_type: "main".to_string(),
+            model,
+            status: "active".to_string(),
+            last_activity,
+            project,
+            last_message,
+            last_tool,
+            last_tool_input,
+            parent_session_id: None,
+        }
+    })
 }
 
 fn walkdir_recursive(
