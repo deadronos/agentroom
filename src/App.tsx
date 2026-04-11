@@ -130,10 +130,14 @@ function App() {
 
   // Load tags on mount
   useEffect(() => {
-    loadAllTags().then((loaded) => {
-      setTags(loaded)
-      setCategories(getAllCategories())
-    }).catch(() => {})
+    if (typeof window !== 'undefined' && '__TAURI__' in window) {
+      loadAllTags().then((loaded) => {
+        setTags(loaded)
+        setCategories(getAllCategories())
+      }).catch(() => {})
+    } else {
+      setLoading(false)
+    }
   }, [])
 
   // Load assets + default layout on mount
@@ -159,6 +163,7 @@ function App() {
 
   // Dynamic provider list from hub sessions
   const availableProviders = useMemo(() => {
+    if (!hubSessions || hubSessions.length === 0) return []
     const set = new Set<string>()
     for (const s of hubSessions) {
       set.add(normalizeProvider(s.provider))
@@ -179,6 +184,7 @@ function App() {
   }, [])
 
   const displayedSessions = useMemo(() => {
+    if (!sessions || sessions.length === 0) return []
     let filtered = sessions
 
     if (!showSubagents) {
