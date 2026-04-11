@@ -1,5 +1,6 @@
 use session_common::{ActiveSession, SessionAdapter, WatchPath, WatchType};
 use std::path::PathBuf;
+use std::env;
 
 pub struct GeminiAdapter;
 
@@ -16,6 +17,31 @@ impl GeminiAdapter {
         Self::home_dir().join(".gemini").join("logs")
     }
 
+    fn tmp_dir() -> PathBuf {
+        Self::home_dir().join(".gemini").join("tmp")
+    }
+
+    /// Additional scan dirs from environment variable
+    fn extra_scan_dirs() -> Vec<PathBuf> {
+        let home = Self::home_dir();
+        match env::var("AGENTROOM_GEMINI_SCAN_DIRS") {
+            Ok(value) => value
+                .split([',', ';'])
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+                .map(|entry| {
+                    if entry.starts_with("~/") {
+                        home.join(entry.trim_start_matches("~/"))
+                    } else {
+                        PathBuf::from(entry)
+                    }
+                })
+                .filter(|p| p.exists())
+                .collect(),
+            Err(_) => Vec::new(),
+        }
+    }
+
     fn parse_session_id(path: &PathBuf) -> String {
         path.file_stem()
             .and_then(|s| s.to_str())
@@ -28,7 +54,7 @@ impl GeminiAdapter {
         let ts = json.get("ts").and_then(|v| v.as_i64()).unwrap_or(0);
         let tool = json.get("name").and_then(|v| v.as_str()).map(String::from);
         let text = json.get("text").and_then(|v| v.as_str()).map(String::from);
-        Some((ts, tool.clone().or(text), tool))
+        Some((ts, text.or(tool.clone()), tool))
     }
 
     fn read_last_jsonl_entry(path: &PathBuf) -> Option<(Option<String>, Option<String>, i64)> {
@@ -37,6 +63,19 @@ impl GeminiAdapter {
         let last_line = lines.last()?;
         let (ts, msg, tool) = Self::parse_jsonl_entry(last_line)?;
         Some((msg, tool, ts))
+    }
+
+    fn is_active(path: &PathBuf, threshold_ms: i64) -> bool {
+        if let Ok(stat) = std::fs::metadata(path) {
+            let mtime = stat.modified().unwrap_or(std::time::UNIX_EPOCH);
+            let mtime_ms = mtime
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64;
+            mtime_ms >= threshold_ms
+        } else {
+            false
+        }
     }
 }
 
@@ -67,7 +106,7 @@ impl SessionAdapter for GeminiAdapter {
     }
 
     fn is_available(&self) -> bool {
-        Self::log_dir().exists()
+        Self::log_dir().exists() || Self::tmp_dir().exists() || !Self::extra_scan_dirs().is_empty()
     }
 
     fn watch_paths(&self) -> Vec<WatchPath> {
@@ -76,6 +115,24 @@ impl SessionAdapter for GeminiAdapter {
         if log_dir.exists() {
             paths.push(WatchPath {
                 path: log_dir,
+                watch_type: WatchType::Directory,
+                filter: Some("*.jsonl".to_string()),
+                recursive: true,
+            });
+        }
+        let tmp_dir = Self::tmp_dir();
+        if tmp_dir.exists() {
+            paths.push(WatchPath {
+                path: tmp_dir,
+                watch_type: WatchType::Directory,
+                filter: Some("*.jsonl".to_string()),
+                recursive: true,
+            });
+        }
+        // Extra scan dirs
+        for dir in Self::extra_scan_dirs() {
+            paths.push(WatchPath {
+                path: dir,
                 watch_type: WatchType::Directory,
                 filter: Some("*.jsonl".to_string()),
                 recursive: true,
@@ -92,29 +149,31 @@ impl SessionAdapter for GeminiAdapter {
         let threshold = now - threshold_ms as i64;
         let mut sessions = Vec::new();
 
-        let dir = Self::log_dir();
-        if !dir.exists() {
-            return sessions;
-        }
-        let mut paths = Vec::new();
-        let _ = walkdir_recursive(&dir, &mut paths, 0, 10);
+        let all_dirs: Vec<PathBuf> = {
+            let mut dirs = Vec::new();
+            if Self::log_dir().exists() { dirs.push(Self::log_dir()); }
+            if Self::tmp_dir().exists() { dirs.push(Self::tmp_dir()); }
+            dirs.extend(Self::extra_scan_dirs());
+            dirs
+        };
 
-        for path in paths {
-            if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+        for dir in all_dirs {
+            if !dir.exists() {
                 continue;
             }
-            if let Ok(stat) = std::fs::metadata(&path) {
-                let mtime = stat.modified().unwrap_or(std::time::UNIX_EPOCH);
-                let mtime_ms = mtime
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as i64;
-                if mtime_ms < threshold {
+            let mut paths = Vec::new();
+            let _ = walkdir_recursive(&dir, &mut paths, 0, 10);
+
+            for path in paths {
+                if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                    continue;
+                }
+                if !Self::is_active(&path, threshold) {
                     continue;
                 }
                 let session_id = format!("gemini:{}", Self::parse_session_id(&path));
                 let (last_message, last_tool, last_activity) =
-                    Self::read_last_jsonl_entry(&path).unwrap_or((None, None, mtime_ms));
+                    Self::read_last_jsonl_entry(&path).unwrap_or((None, None, threshold));
                 sessions.push(ActiveSession {
                     session_id,
                     provider: "gemini".to_string(),
