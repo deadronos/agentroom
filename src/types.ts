@@ -1,3 +1,6 @@
+// Re-export HubActiveSession from hub service for consumer convenience
+export type { HubActiveSession } from './services/hub';
+
 export interface Session {
   id: string
   agent: string
@@ -72,19 +75,4 @@ export const RESUME_CONFIGS: Record<string, ResumeConfig> = {
     resumeArgs: ['--resume', '{sessionId}', '--yolo'],
     sessionIdFields: ['sessionId'],
   },
-}
-
-export interface HubActiveSession {
-  session_id: string;
-  provider: string;
-  agent_id: string | null;
-  agent_type: string;
-  model: string;
-  status: string;
-  last_activity: number;
-  project: string | null;
-  last_message: string | null;
-  last_tool: string | null;
-  last_tool_input: string | null;
-  parent_session_id: string | null;
 }
