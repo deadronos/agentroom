@@ -7,7 +7,9 @@ npm-debug.log*
 # Rust / Tauri
 src-tauri/target/
 search-backend/*/target/
-
+src/session_collector/target/
+src/session_common/target/
+src/session_hub/target/
 
 # OS / editors
 .DS_Store
@@ -16,7 +18,9 @@ search-backend/*/target/
 
 # Env / secrets
 .env
+.env.local
 .env.*
+!.env.example
 
 # Generated local state
 coverage/
