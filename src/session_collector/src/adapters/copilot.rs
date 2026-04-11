@@ -169,9 +169,17 @@ impl SessionAdapter for CopilotAdapter {
                             }
                             project = c;
                         }
-                    } else if entry_type == Some("user.message".to_string())
-                        || entry_type == Some("assistant.message".to_string())
-                    {
+                    } else if entry_type == Some("assistant.message".to_string()) {
+                        if let Some(d) = data {
+                            last_message = Self::get_message_content(d);
+                            // Also check for model in assistant.message
+                            if model == "unknown" {
+                                if let Some(selected_model) = d.get("selectedModel").and_then(|v| v.as_str()) {
+                                    model = selected_model.to_string();
+                                }
+                            }
+                        }
+                    } else if entry_type == Some("user.message".to_string()) {
                         if let Some(d) = data {
                             last_message = Self::get_message_content(d);
                         }
@@ -246,9 +254,17 @@ impl SessionAdapter for CopilotAdapter {
                         }
                         project = c;
                     }
-                } else if entry_type == Some("user.message".to_string())
-                    || entry_type == Some("assistant.message".to_string())
-                {
+                } else if entry_type == Some("assistant.message".to_string()) {
+                    if let Some(d) = data {
+                        last_message = Self::get_message_content(d);
+                        // Also check for model in assistant.message
+                        if model == "unknown" {
+                            if let Some(selected_model) = d.get("selectedModel").and_then(|v| v.as_str()) {
+                                model = selected_model.to_string();
+                            }
+                        }
+                    }
+                } else if entry_type == Some("user.message".to_string()) {
                     if let Some(d) = data {
                         last_message = Self::get_message_content(d);
                     }
