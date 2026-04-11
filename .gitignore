@@ -5,6 +5,7 @@ dist/
 npm-debug.log*
 
 # Rust / Tauri
+target/
 src-tauri/target/
 search-backend/*/target/
 src/session_collector/target/
