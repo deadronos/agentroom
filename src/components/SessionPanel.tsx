@@ -6,6 +6,7 @@ import type { Session, SessionMessage } from '../types.js'
 interface Props {
   session: Session
   onClose: () => void
+  visible?: boolean
 }
 
 function formatTime(ts: number | null): string {
@@ -16,7 +17,7 @@ function formatTime(ts: number | null): string {
   return `${hh}:${mm}`
 }
 
-export function SessionPanel({ session, onClose }: Props) {
+export function SessionPanel({ session, onClose, visible }: Props) {
   const [messages, setMessages] = useState<SessionMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [resuming, setResuming] = useState(false)
@@ -66,7 +67,7 @@ export function SessionPanel({ session, onClose }: Props) {
   const filename = session.sourcePath.split('/').pop() || session.sourcePath
 
   return (
-    <div className="session-panel" data-testid="session-panel">
+    <div className={`session-panel ${visible === false ? 'hidden' : ''}`} data-testid="session-panel">
       <div className="sp-header">
         <div className="sp-title-row">
           <span className="sp-agent-badge" data-testid="sp-agent-badge">{agentLabel}</span>
