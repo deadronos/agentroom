@@ -3246,6 +3246,7 @@ dependencies = [
  "serde_json",
  "session_common",
  "sha1",
+ "sha2",
  "tokio",
  "tokio-tungstenite",
  "tracing",
