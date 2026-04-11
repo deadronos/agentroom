@@ -1,3 +1,44 @@
 .session-panel.hidden {
   display: none;
 }
+
+/* Agent icon colors — each agent gets a distinct color */
+.agent-icon-claude-code { background: #3b82f6; }
+.agent-icon-codex { background: #22c55e; }
+.agent-icon-openclaw { background: #f97316; }
+.agent-icon-opencode { background: #8b5cf6; }
+.agent-icon-copilot { background: #06b6d4; }
+.agent-icon-gemini { background: #eab308; }
+
+.agent-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: white;
+  font-weight: bold;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* Status dot */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-left: 6px;
+}
+.status-dot.active { background: #22c55e; }
+.status-dot.ended { background: #9ca3af; }
+
+/* Hub connection banner */
+.hub-banner {
+  background: #f59e0b;
+  color: black;
+  text-align: center;
+  padding: 6px;
+  font-size: 13px;
+}
