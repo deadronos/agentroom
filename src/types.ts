@@ -72,3 +72,18 @@ export const RESUME_CONFIGS: Record<string, ResumeConfig> = {
     sessionIdFields: ['sessionId'],
   },
 }
+
+export interface HubActiveSession {
+  session_id: string;
+  provider: string;
+  agent_id: string | null;
+  agent_type: string;
+  model: string;
+  status: string;
+  last_activity: number;
+  project: string | null;
+  last_message: string | null;
+  last_tool: string | null;
+  last_tool_input: string | null;
+  parent_session_id: string | null;
+}
