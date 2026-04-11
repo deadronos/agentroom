@@ -14,10 +14,10 @@ export interface HubActiveSession {
 }
 
 export type HubMessage =
-  | { type: 'state_sync'; sessions: HubActiveSession[] }
-  | { type: 'session_started'; session_id: string; provider: string; project: string | null; model: string; timestamp: number; last_tool: string | null; last_message: string | null; agent_id: string | null; agent_type: string }
-  | { type: 'activity'; session_id: string; provider: string; timestamp: number; tool: string | null; message_preview: string | null }
-  | { type: 'session_ended'; session_id: string; provider: string; timestamp: number }
+  | { type: 'state_sync'; data: { sessions: HubActiveSession[] } }
+  | { type: 'session_started'; data: { session_id: string; provider: string; project: string | null; model: string; timestamp: number; last_tool: string | null; last_message: string | null; agent_id: string | null; agent_type: string } }
+  | { type: 'activity'; data: { session_id: string; provider: string; timestamp: number; tool: string | null; message_preview: string | null } }
+  | { type: 'session_ended'; data: { session_id: string; provider: string; timestamp: number } }
   | { type: 'ack'; fingerprint: string }
   | { type: 'error'; message: string };
 
@@ -63,10 +63,7 @@ export class HubClient {
 
     this.ws.onmessage = (event) => {
       try {
-        const raw = event.data;
-        console.warn('[HubClient] Raw WS message:', typeof raw === 'string' ? raw.slice(0, 200) : raw);
-        const msg = JSON.parse(raw) as HubMessage;
-        console.warn('[HubClient] Parsed msg type:', msg.type, '| has sessions:', 'sessions' in msg, '| sessions value:', (msg as Record<string, unknown>)['sessions']);
+        const msg = JSON.parse(event.data) as HubMessage;
         this.dispatch(msg);
       } catch (err) {
         console.warn('[HubClient] Failed to parse message:', err);
@@ -98,29 +95,29 @@ export class HubClient {
   private dispatch(msg: HubMessage): void {
     switch (msg.type) {
       case 'state_sync':
-        this.opts.onStateSync?.(msg.sessions);
+        this.opts.onStateSync?.(msg.data.sessions);
         break;
       case 'session_started':
         this.opts.onSessionStarted?.({
-          session_id: msg.session_id,
-          provider: msg.provider,
-          agent_id: msg.agent_id,
-          agent_type: msg.agent_type,
-          model: msg.model,
+          session_id: msg.data.session_id,
+          provider: msg.data.provider,
+          agent_id: msg.data.agent_id,
+          agent_type: msg.data.agent_type,
+          model: msg.data.model,
           status: 'active',
-          last_activity: msg.timestamp,
-          project: msg.project,
-          last_message: msg.last_message,
-          last_tool: msg.last_tool,
+          last_activity: msg.data.timestamp,
+          project: msg.data.project,
+          last_message: msg.data.last_message,
+          last_tool: msg.data.last_tool,
           last_tool_input: null,
           parent_session_id: null,
         });
         break;
       case 'session_ended':
-        this.opts.onSessionEnded?.(msg.session_id);
+        this.opts.onSessionEnded?.(msg.data.session_id);
         break;
       case 'activity':
-        this.opts.onActivity?.(msg.session_id, msg.tool, msg.message_preview);
+        this.opts.onActivity?.(msg.data.session_id, msg.data.tool, msg.data.message_preview);
         break;
       case 'ack':
       case 'error':
