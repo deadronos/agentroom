@@ -54,6 +54,7 @@ impl Collector {
         }
 
         let sessions = self.collect_sessions();
+        tracing::debug!("Collected {} sessions", sessions.len());
         let fingerprint = self.compute_fingerprint(&sessions);
 
         if Some(&fingerprint) == self.last_fingerprint.as_ref() {
@@ -78,18 +79,19 @@ impl Collector {
     }
 
     fn collect_sessions(&self) -> Vec<ActiveSession> {
+        let threshold_ms = 120000u64; // 2 minutes
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis() as i64;
-        let threshold = now - 120000;
+        let threshold = now - threshold_ms as i64;
         let mut all_sessions = Vec::new();
 
         for adapter in &self.adapters {
             if !adapter.is_available() {
                 continue;
             }
-            let sessions = adapter.active_sessions(120000);
+            let sessions = adapter.active_sessions(threshold_ms);
             for session in sessions {
                 if session.last_activity >= threshold {
                     all_sessions.push(session);

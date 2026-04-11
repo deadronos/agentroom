@@ -220,11 +220,11 @@ impl SessionAdapter for ClaudeAdapter {
     }
 
     fn active_sessions(&self, threshold_ms: u64) -> Vec<ActiveSession> {
-        let now = std::time::SystemTime::now()
+        let now_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_millis() as i64;
-        let threshold = now - threshold_ms as i64;
+            .as_secs() as i64;
+        let threshold_secs = now_secs - (threshold_ms / 1000) as i64;
         let mut sessions = Vec::new();
 
         // Step 1: Parse history.jsonl to build sessions map keyed by sessionId
@@ -232,8 +232,8 @@ impl SessionAdapter for ClaudeAdapter {
 
         // Step 2: For each session, check file mtime + history timestamp >= threshold
         for (session_id, entry) in &history_entries {
-            // Skip if history timestamp is too old
-            if entry.timestamp < threshold {
+            // Skip if history timestamp is too old (entry.timestamp is in milliseconds, threshold_secs is in seconds)
+            if entry.timestamp < threshold_secs * 1000 {
                 continue;
             }
 
@@ -253,7 +253,7 @@ impl SessionAdapter for ClaudeAdapter {
                 None => (None, None),
             };
 
-            // Check file mtime if session file exists
+            // Check file mtime if session file exists (in milliseconds)
             let mtime_ms = session_path
                 .as_ref()
                 .and_then(|p| std::fs::metadata(p).ok())
@@ -266,11 +266,11 @@ impl SessionAdapter for ClaudeAdapter {
                 .unwrap_or(entry.timestamp);
 
             // Skip if file mtime is too old
-            if mtime_ms < threshold {
+            if mtime_ms < threshold_secs * 1000 {
                 continue;
             }
 
-            // Determine last activity: use max of history timestamp and file mtime
+            // Determine last activity: use max of history timestamp and file mtime (both in ms)
             let last_activity = entry.timestamp.max(mtime_ms);
 
             // Try to get recent message/tool from session file
@@ -351,7 +351,7 @@ impl SessionAdapter for ClaudeAdapter {
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap()
                         .as_millis() as i64;
-                    if mtime_ms < threshold {
+                    if mtime_ms < threshold_secs * 1000 {
                         continue;
                     }
 

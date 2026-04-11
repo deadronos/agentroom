@@ -107,7 +107,9 @@ async fn handle_collector_connection(
                         };
                         
                         let diff = state.apply_snapshot(snapshot).await;
-                        
+                        // Broadcast updated state to all connected frontends
+                        state.broadcast_state().await;
+
                         let ack = HubMessage::Ack { fingerprint: ack_fingerprint };
                         write.send(Message::Text(serde_json::to_string(&ack)?)).await?;
                         
@@ -130,13 +132,35 @@ async fn handle_frontend_connection(
     state: HubState,
 ) -> anyhow::Result<()> {
     let ws_stream = accept_async(stream).await?;
-    let (mut write, _read) = ws_stream.split();
-    
+    let (mut write, mut read) = ws_stream.split();
+
+    // Send initial state sync
     let sessions = state.get_all_sessions().await;
     let sync = HubMessage::StateSync { sessions };
     write.send(Message::Text(serde_json::to_string(&sync)?)).await?;
-    
-    tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
-    
+
+    // Subscribe to broadcasts from collectors
+    let mut rx = state.subscribe_frontend();
+
+    loop {
+        tokio::select! {
+            // Forward broadcast messages to frontend
+            msg = rx.recv() => {
+                if let Ok(hub_msg) = msg {
+                    write.send(Message::Text(serde_json::to_string(&hub_msg)?)).await?;
+                }
+            }
+            // Handle incoming messages from frontend (e.g., close)
+            msg = read.next() => {
+                if msg.is_none() {
+                    break;
+                }
+                if let Ok(Message::Close(_)) = msg.unwrap() {
+                    break;
+                }
+            }
+        }
+    }
+
     Ok(())
 }

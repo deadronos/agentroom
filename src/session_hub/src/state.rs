@@ -1,20 +1,36 @@
-use session_common::ActiveSession;
+use session_common::{ActiveSession, HubMessage};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 
 #[derive(Clone)]
 pub struct HubState {
     collector_snapshots: Arc<RwLock<HashMap<String, session_common::Snapshot>>>,
     merged_sessions: Arc<RwLock<HashMap<String, ActiveSession>>>,
+    /// Broadcast channel for sending state updates to all connected frontends
+    frontend_broadcast: broadcast::Sender<HubMessage>,
 }
 
 impl HubState {
     pub fn new() -> Self {
+        let (bcast, _) = broadcast::channel(16);
         Self {
             collector_snapshots: Arc::new(RwLock::new(HashMap::new())),
             merged_sessions: Arc::new(RwLock::new(HashMap::new())),
+            frontend_broadcast: bcast,
         }
+    }
+
+    /// Subscribe to frontend broadcast messages. Returns a receiver handle.
+    pub fn subscribe_frontend(&self) -> broadcast::Receiver<HubMessage> {
+        self.frontend_broadcast.subscribe()
+    }
+
+    /// Broadcast current session state to all connected frontends.
+    pub async fn broadcast_state(&self) {
+        let sessions = self.get_all_sessions().await;
+        let sync = HubMessage::StateSync { sessions };
+        let _ = self.frontend_broadcast.send(sync);
     }
 
     pub async fn apply_snapshot(&self, snapshot: session_common::Snapshot) -> SessionDiff {
