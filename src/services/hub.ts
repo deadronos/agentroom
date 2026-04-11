@@ -34,7 +34,7 @@ export interface HubClientOptions {
 
 export class HubClient {
   private ws: WebSocket | null = null;
-  private opts: HubClientOptions;
+  public opts: HubClientOptions;
   private reconnectDelay = 1000;
   private reconnectMaxDelay = 30000;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;

@@ -11,6 +11,7 @@ export interface Session {
   score?: number
   matchType?: string
   snippet?: string
+  last_tool?: string | null
 }
 
 export interface SessionSearchResult {

@@ -1,3 +1,4 @@
+// src/App.tsx
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { OfficeState } from './office/engine/officeState.js'
 import { OfficeCanvas } from './office/components/OfficeCanvas.js'
@@ -13,25 +14,20 @@ import { SessionList } from './components/SessionList.js'
 import { SessionPanel } from './components/SessionPanel.js'
 import { StatusBar } from './components/StatusBar.js'
 import { TokenPanel } from './components/TokenPanel.js'
-import { listAllSessions, searchSessions } from './services/cass.js'
 import { getAllCategories, loadAllTags } from './services/tags.js'
-import type { Session, SessionTag } from './types.js'
+import type { Session, SessionTag, HubActiveSession } from './types.js'
+import { getHubClient } from './services/hub.js'
+import { hubSessionToSession } from './adapters/hubSession.js'
 
-type AgentFilter = 'all' | 'claude-code' | 'codex' | 'gemini'
 type ViewMode = 'grouped' | 'flat'
 type MainView = 'office' | 'sessions'
 
-function isClaudeSubagent(session: Session): boolean {
-  return session.agent === 'claude-code' && !!session.isSubagent
-}
-
 function projectBasename(workspace: string | null): string {
   if (!workspace) return 'Other'
-  const parts = workspace.split('/').filter(Boolean)
+  const parts = (workspace ?? '').split('/').filter(Boolean)
   return parts[parts.length - 1] || 'Other'
 }
 
-// Game state lives outside React — updated imperatively by event handlers
 const officeStateRef = { current: null as OfficeState | null }
 const editorState = new EditorState()
 
@@ -48,50 +44,97 @@ function App() {
   const panRef = useRef({ x: 0, y: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Session search/filter state
+  // Session state from hub
   const [sessions, setSessions] = useState<Session[]>([])
+  const [hubSessions, setHubSessions] = useState<HubActiveSession[]>([])
   const [tags, setTags] = useState<Record<string, SessionTag>>({})
   const [categories, setCategories] = useState<string[]>([])
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
+  const [sessionPanelOpen, setSessionPanelOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
-  const [agentFilter, setAgentFilter] = useState<AgentFilter>('all')
+  const [agentFilter, setAgentFilter] = useState<string>('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
-  const [showClaudeSubagents, setShowClaudeSubagents] = useState(false)
+  const [showSubagents, setShowSubagents] = useState(false)
   const [viewMode, setViewMode] = useState<ViewMode>('grouped')
   const [focusedProject, setFocusedProject] = useState<string | null>(null)
   const [mainView, setMainView] = useState<MainView>('office')
+  const [hubConnected, setHubConnected] = useState(false)
 
   const { agents, agentTools, subagentCharacters, clearAll, getAgentStringId } = useAgentEvents(getOfficeState)
 
-  // Load sessions from CASS
-  const loadSessions = useCallback(async (agent: AgentFilter) => {
-    setLoading(true)
-    try {
-      const allSessions = await listAllSessions(90)
-      const filtered = agent === 'all' ? allSessions : allSessions.filter((s) => s.agent === agent)
-      setSessions(filtered)
-      setSelectedSession((current) => (current && filtered.some((s) => s.id === current.id) ? current : null))
-    } catch {
-      console.warn('[App] Could not load sessions — CASS may not be available')
-    }
+  // Hub event handlers
+  const handleStateSync = useCallback((incomingHubSessions: HubActiveSession[]) => {
+    setHubSessions(incomingHubSessions)
+    setSessions(incomingHubSessions.map(hubSessionToSession))
     setLoading(false)
   }, [])
 
-  // Load tags
+  const handleSessionStarted = useCallback((hubSession: HubActiveSession) => {
+    setHubSessions((prev) => {
+      const exists = prev.some((s) => s.session_id === hubSession.session_id)
+      if (exists) return prev
+      return [...prev, hubSession]
+    })
+    setSessions((prev) => {
+      const exists = prev.some((s) => s.id === hubSession.session_id)
+      if (exists) return prev
+      return [...prev, hubSessionToSession(hubSession)]
+    })
+  }, [])
+
+  const handleSessionEnded = useCallback((sessionId: string) => {
+    setHubSessions((prev) =>
+      prev.map((s) =>
+        s.session_id === sessionId ? { ...s, status: 'ended' } : s
+      )
+    )
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === sessionId ? { ...s, endedAt: Date.now() } : s
+      )
+    )
+  }, [])
+
+  const handleActivity = useCallback((sessionId: string, tool: string | null, messagePreview: string | null) => {
+    const update = (s: HubActiveSession) =>
+      s.session_id === sessionId
+        ? { ...s, last_activity: Date.now(), last_tool: tool, last_message: messagePreview }
+        : s
+    setHubSessions((prev) => prev.map(update))
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === sessionId
+          ? { ...s, snippet: messagePreview ?? s.snippet }
+          : s
+      )
+    )
+  }, [])
+
+  // Connect to hub on mount, disconnect on unmount
+  useEffect(() => {
+    const client = getHubClient()
+    client.opts.onStateSync = handleStateSync
+    client.opts.onSessionStarted = handleSessionStarted
+    client.opts.onSessionEnded = handleSessionEnded
+    client.opts.onActivity = handleActivity
+    client.opts.onConnectionStateChange = (state) => {
+      setHubConnected(state === 'connected')
+    }
+    client.connect()
+
+    return () => {
+      client.disconnect()
+    }
+  }, [handleStateSync, handleSessionStarted, handleSessionEnded, handleActivity])
+
+  // Load tags on mount
   useEffect(() => {
     loadAllTags().then((loaded) => {
       setTags(loaded)
       setCategories(getAllCategories())
-    }).catch(() => {
-      // Tags service may not be available
-    })
+    }).catch(() => {})
   }, [])
-
-  // Load sessions on mount
-  useEffect(() => {
-    loadSessions('all')
-  }, [loadSessions])
 
   // Load assets + default layout on mount
   useEffect(() => {
@@ -114,43 +157,55 @@ function App() {
     return () => { cancelled = true }
   }, [])
 
-  const handleSearch = useCallback(async (
+  // Dynamic provider list from hub sessions
+  const availableProviders = useMemo(() => {
+    const set = new Set<string>()
+    for (const s of hubSessions) {
+      set.add(s.provider)
+    }
+    return Array.from(set).sort()
+  }, [hubSessions])
+
+  const handleSearch = useCallback((
     query: string,
-    agent: AgentFilter,
+    agent: string,
     category: string,
-    showSubagents: boolean,
+    showSubagentsFlag: boolean,
   ) => {
     setSearchQuery(query)
     setAgentFilter(agent)
     setCategoryFilter(category)
-    setShowClaudeSubagents(showSubagents)
-    if (!query.trim()) {
-      loadSessions(agent)
-      return
-    }
-    setLoading(true)
-    try {
-      const result = await searchSessions(query, { limit: 50, agent: agent === 'all' ? undefined : agent })
-      setSessions(result.sessions)
-    } catch {
-      console.warn('[App] Search failed')
-    }
-    setLoading(false)
-  }, [loadSessions])
+    setShowSubagents(showSubagentsFlag)
+  }, [])
 
   const displayedSessions = useMemo(() => {
-    let filtered = showClaudeSubagents
-      ? sessions
-      : sessions.filter((s) => !isClaudeSubagent(s))
+    let filtered = sessions
+
+    if (!showSubagents) {
+      filtered = filtered.filter((s) => !s.isSubagent)
+    }
 
     if (categoryFilter !== 'all') {
       filtered = filtered.filter((s) => tags[s.id]?.category === categoryFilter)
     }
 
-    return filtered
-  }, [sessions, tags, categoryFilter, showClaudeSubagents])
+    if (agentFilter !== 'all') {
+      filtered = filtered.filter((s) => s.agent === agentFilter)
+    }
 
-  // Group sessions by workspace/project
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      filtered = filtered.filter((s) =>
+        (s.title?.toLowerCase() ?? '').includes(q) ||
+        (s.snippet?.toLowerCase() ?? '').includes(q) ||
+        (s.workspace ?? '').toLowerCase().includes(q) ||
+        (s.last_tool ?? '').toLowerCase().includes(q)
+      )
+    }
+
+    return filtered
+  }, [sessions, tags, categoryFilter, agentFilter, showSubagents, searchQuery])
+
   const groupedSessions = useMemo(() => {
     const groups = new Map<string, Session[]>()
     for (const s of displayedSessions) {
@@ -166,7 +221,6 @@ function App() {
     })
   }, [displayedSessions])
 
-  // Map project basename → full workspace path (for focus button)
   const projectWorkspaces = useMemo(() => {
     const map = new Map<string, string>()
     for (const s of displayedSessions) {
@@ -180,6 +234,21 @@ function App() {
     return map
   }, [displayedSessions])
 
+  const handleSelectSession = useCallback((session: Session) => {
+    if (selectedSession?.id === session.id) {
+      // Toggle: clicking same session closes panel
+      setSessionPanelOpen(false)
+      setSelectedSession(null)
+    } else {
+      setSelectedSession(session)
+      setSessionPanelOpen(true)
+    }
+  }, [selectedSession])
+
+  const handleClosePanel = useCallback(() => {
+    setSessionPanelOpen(false)
+  }, [])
+
   const handleFocusProject = useCallback(async (workspace: string | null) => {
     clearAll()
     setFocusedProject(workspace)
@@ -189,17 +258,6 @@ function App() {
       console.warn('[App] Could not switch watching')
     }
   }, [clearAll])
-
-  // When a session is clicked, also focus the watcher on its workspace
-  const handleSelectSession = useCallback((session: Session) => {
-    setSelectedSession(session)
-    if (session.workspace) {
-      // Only switch watcher if it's a different project than currently focused
-      if (focusedProject !== session.workspace) {
-        handleFocusProject(session.workspace)
-      }
-    }
-  }, [focusedProject, handleFocusProject])
 
   useEffect(() => {
     setSelectedSession((current) => (
@@ -213,25 +271,18 @@ function App() {
   }, [])
 
   const handleClick = useCallback((agentId: number) => {
-    // Find the matching session for this agent character
     const agentStringId = getAgentStringId(agentId)
     if (!agentStringId) return
-    // Match session by checking if sourcePath contains the agent_id (UUID file stem)
     const match = sessions.find((s) => s.sourcePath.includes(agentStringId))
     if (match) {
       setSelectedSession(match)
+      setSessionPanelOpen(true)
     }
   }, [getAgentStringId, sessions])
 
-  const handleCloseAgent = useCallback((_id: number) => {
-    // No-op in standalone
-  }, [])
+  const handleCloseAgent = useCallback((_id: number) => {}, [])
+  const handleZoomChange = useCallback((newZoom: number) => { setZoom(newZoom) }, [])
 
-  const handleZoomChange = useCallback((newZoom: number) => {
-    setZoom(newZoom)
-  }, [])
-
-  // Editor no-ops for MVP
   const noopTile = useCallback((_col: number, _row: number) => {}, [])
   const noopSelection = useCallback(() => {}, [])
   const noopDelete = useCallback(() => {}, [])
@@ -243,14 +294,9 @@ function App() {
   if (!layoutReady) {
     return (
       <div style={{
-        width: '100%',
-        height: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: 'var(--vscode-foreground)',
-        background: 'var(--pixel-bg)',
-        fontSize: '24px',
+        width: '100%', height: '100%', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', color: 'var(--vscode-foreground)',
+        background: 'var(--pixel-bg)', fontSize: '24px',
       }}>
         Loading...
       </div>
@@ -258,33 +304,26 @@ function App() {
   }
 
   return (
-    <div data-testid="app-root" className={`app ${mainView === 'sessions' ? 'app-sessions-view' : ''} ${selectedSession && mainView === 'office' ? 'app-with-panel' : ''}`}>
-      {/* Sidebar: Search + Session List */}
+    <div data-testid="app-root" className={`app ${mainView === 'sessions' ? 'app-sessions-view' : ''} ${sessionPanelOpen && mainView === 'sessions' ? 'app-with-panel' : ''}`}>
+      {!hubConnected && (
+        <div className="hub-banner" data-testid="hub-banner">
+          Hub offline — waiting to reconnect...
+        </div>
+      )}
+
       <div className="sidebar" data-testid="sidebar">
-        {/* View Switcher */}
         <div className="main-view-toggle" data-testid="view-switcher">
-          <button
-            data-testid="tab-office"
-            className={mainView === 'office' ? 'active' : ''}
-            onClick={() => setMainView('office')}
-          >
-            Agent Office
-          </button>
-          <button
-            data-testid="tab-sessions"
-            className={mainView === 'sessions' ? 'active' : ''}
-            onClick={() => setMainView('sessions')}
-          >
-            Sessions
-          </button>
+          <button data-testid="tab-office" className={mainView === 'office' ? 'active' : ''} onClick={() => setMainView('office')}>Agent Office</button>
+          <button data-testid="tab-sessions" className={mainView === 'sessions' ? 'active' : ''} onClick={() => setMainView('sessions')}>Sessions</button>
         </div>
 
         <SearchBar
           onSearch={handleSearch}
           categories={categories}
+          availableProviders={availableProviders}
           initialAgent={agentFilter}
           initialCategory={categoryFilter}
-          initialShowClaudeSubagents={showClaudeSubagents}
+          initialShowSubagents={showSubagents}
         />
         <SessionList
           sessions={displayedSessions}
@@ -302,7 +341,6 @@ function App() {
         />
       </div>
 
-      {/* Main content area: Office or Sessions view */}
       {mainView === 'office' ? (
         <div className="main-panel" data-testid="main-panel-office">
           <div ref={containerRef} data-testid="office-container" style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
@@ -322,57 +360,25 @@ function App() {
               onZoomChange={handleZoomChange}
               panRef={panRef}
             />
-
-            {/* Vignette overlay */}
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                background: 'var(--pixel-vignette)',
-                pointerEvents: 'none',
-                zIndex: 40,
-              }}
-            />
-
-            <ToolOverlay
-              officeState={officeState}
-              agents={agents}
-              agentTools={agentTools}
-              subagentCharacters={subagentCharacters}
-              containerRef={containerRef}
-              zoom={zoom}
-              panRef={panRef}
-              onCloseAgent={handleCloseAgent}
-            />
-
+            <div style={{ position: 'absolute', inset: 0, background: 'var(--pixel-vignette)', pointerEvents: 'none', zIndex: 40 }} />
+            <ToolOverlay officeState={officeState} agents={agents} agentTools={agentTools} subagentCharacters={subagentCharacters} containerRef={containerRef} zoom={zoom} panRef={panRef} onCloseAgent={handleCloseAgent} />
             <TokenPanel />
           </div>
         </div>
       ) : (
-        /* Sessions full view — transcript fills the main area */
         <div className="main-panel main-panel-sessions" data-testid="main-panel-sessions">
-          {selectedSession ? (
-            <SessionPanel
-              session={selectedSession}
-              onClose={() => setSelectedSession(null)}
-            />
+          {selectedSession && sessionPanelOpen ? (
+            <SessionPanel session={selectedSession} onClose={handleClosePanel} />
           ) : (
-            <div className="sessions-placeholder">
-              Select a session from the sidebar to view its transcript
-            </div>
+            <div className="sessions-placeholder">Select a session from the sidebar to view its transcript</div>
           )}
         </div>
       )}
 
-      {/* Right: Session Preview Panel (only in office view) */}
       {selectedSession && mainView === 'office' && (
-        <SessionPanel
-          session={selectedSession}
-          onClose={() => setSelectedSession(null)}
-        />
+        <SessionPanel session={selectedSession} onClose={() => setSelectedSession(null)} />
       )}
 
-      {/* Bottom: Status Bar */}
       <StatusBar sessions={displayedSessions} tags={tags} onTagUpdate={handleTagUpdate} />
     </div>
   )
