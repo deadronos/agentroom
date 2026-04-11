@@ -12,11 +12,12 @@ impl CopilotAdapter {
         dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
     }
 
-    fn log_dirs() -> Vec<PathBuf> {
-        vec![
-            Self::home_dir().join(".github").join("copilot"),
-            Self::home_dir().join(".copilot"),
-        ]
+    fn sessions_dir() -> PathBuf {
+        Self::home_dir().join(".copilot").join("sessions")
+    }
+
+    fn log_dir() -> PathBuf {
+        Self::home_dir().join(".copilot").join("logs")
     }
 
     fn parse_session_id(path: &PathBuf) -> String {
@@ -40,6 +41,19 @@ impl CopilotAdapter {
         let last_line = lines.last()?;
         let (ts, msg, tool) = Self::parse_jsonl_entry(last_line)?;
         Some((msg, tool, ts))
+    }
+
+    fn is_active(path: &PathBuf, threshold_ms: i64) -> bool {
+        if let Ok(stat) = std::fs::metadata(path) {
+            let mtime = stat.modified().unwrap_or(std::time::UNIX_EPOCH);
+            let mtime_ms = mtime
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64;
+            mtime_ms >= threshold_ms
+        } else {
+            false
+        }
     }
 }
 
@@ -70,20 +84,30 @@ impl SessionAdapter for CopilotAdapter {
     }
 
     fn is_available(&self) -> bool {
-        Self::log_dirs().iter().any(|d| d.exists())
+        Self::sessions_dir().exists() || Self::log_dir().exists()
     }
 
     fn watch_paths(&self) -> Vec<WatchPath> {
         let mut paths = Vec::new();
-        for log_dir in Self::log_dirs() {
-            if log_dir.exists() {
-                paths.push(WatchPath {
-                    path: log_dir,
-                    watch_type: WatchType::Directory,
-                    filter: Some("*.jsonl".to_string()),
-                    recursive: true,
-                });
-            }
+        // Primary: sessions directory (newer copilot CLI)
+        let sessions_dir = Self::sessions_dir();
+        if sessions_dir.exists() {
+            paths.push(WatchPath {
+                path: sessions_dir,
+                watch_type: WatchType::Directory,
+                filter: Some("*.jsonl".to_string()),
+                recursive: true,
+            });
+        }
+        // Fallback: logs directory
+        let log_dir = Self::log_dir();
+        if log_dir.exists() {
+            paths.push(WatchPath {
+                path: log_dir,
+                watch_type: WatchType::Directory,
+                filter: Some("*.jsonl".to_string()),
+                recursive: true,
+            });
         }
         paths
     }
@@ -96,7 +120,8 @@ impl SessionAdapter for CopilotAdapter {
         let threshold = now - threshold_ms as i64;
         let mut sessions = Vec::new();
 
-        for dir in Self::log_dirs() {
+        // Check both sessions and logs directories
+        for dir in [Self::sessions_dir(), Self::log_dir()] {
             if !dir.exists() {
                 continue;
             }
@@ -107,33 +132,26 @@ impl SessionAdapter for CopilotAdapter {
                 if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
                     continue;
                 }
-                if let Ok(stat) = std::fs::metadata(&path) {
-                    let mtime = stat.modified().unwrap_or(std::time::UNIX_EPOCH);
-                    let mtime_ms = mtime
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis() as i64;
-                    if mtime_ms < threshold {
-                        continue;
-                    }
-                    let session_id = format!("copilot:{}", Self::parse_session_id(&path));
-                    let (last_message, last_tool, last_activity) =
-                        Self::read_last_jsonl_entry(&path).unwrap_or((None, None, mtime_ms));
-                    sessions.push(ActiveSession {
-                        session_id,
-                        provider: "copilot".to_string(),
-                        agent_id: None,
-                        agent_type: "main".to_string(),
-                        model: "unknown".to_string(),
-                        status: "active".to_string(),
-                        last_activity,
-                        project: path.parent().map(|p| p.to_string_lossy().to_string()),
-                        last_message,
-                        last_tool,
-                        last_tool_input: None,
-                        parent_session_id: None,
-                    });
+                if !Self::is_active(&path, threshold) {
+                    continue;
                 }
+                let session_id = format!("copilot:{}", Self::parse_session_id(&path));
+                let (last_message, last_tool, last_activity) =
+                    Self::read_last_jsonl_entry(&path).unwrap_or((None, None, threshold));
+                sessions.push(ActiveSession {
+                    session_id,
+                    provider: "copilot".to_string(),
+                    agent_id: None,
+                    agent_type: "main".to_string(),
+                    model: "unknown".to_string(),
+                    status: "active".to_string(),
+                    last_activity,
+                    project: path.parent().map(|p| p.to_string_lossy().to_string()),
+                    last_message,
+                    last_tool,
+                    last_tool_input: None,
+                    parent_session_id: None,
+                });
             }
         }
         sessions
