@@ -1,9 +1,10 @@
 use notify::{
     Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
+use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 pub struct SessionWatcher {
@@ -29,7 +30,7 @@ impl SessionWatcher {
                 if let Ok(event) = res {
                     match event.kind {
                         EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
-                            *dirty.lock().unwrap() = true;
+                            *dirty.lock() = true;
                         }
                         _ => {}
                     }
@@ -45,16 +46,16 @@ impl SessionWatcher {
         };
         watcher.watch(&path, mode)?;
 
-        self.watch_paths.lock().unwrap().insert(path);
+        self.watch_paths.lock().insert(path);
         self.watchers.push(watcher); // Keep watcher alive
         Ok(())
     }
 
     pub fn is_dirty(&self) -> bool {
-        *self.dirty.lock().unwrap()
+        *self.dirty.lock()
     }
 
     pub fn clear_dirty(&self) {
-        *self.dirty.lock().unwrap() = false;
+        *self.dirty.lock() = false;
     }
 }
