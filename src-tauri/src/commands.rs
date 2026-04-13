@@ -894,7 +894,7 @@ pub async fn cass_sessions(days: Option<u32>) -> Result<String, String> {
 #[tauri::command]
 pub async fn cass_transcript(path: String) -> Result<String, String> {
     let output = tokio::process::Command::new(cass_bin())
-        .args(["export", &path, "--format", "json"])
+        .args(["export", "--format", "json", "--", &path])
         .output()
         .await
         .map_err(|e| e.to_string())?;
@@ -1058,6 +1058,7 @@ pub async fn tag_session(
         if let Some(model_name) = model_override.as_deref() {
             command.args(["--model", model_name]);
         }
+        command.arg("--");
         command.arg(&prompt);
         let label = match model_override.as_deref() {
             Some(model_name) => format!("gemini:{model_name}"),
@@ -1073,6 +1074,7 @@ pub async fn tag_session(
                 "json",
                 "--model",
                 &model_name,
+                "--",
                 &prompt,
             ])
             .output()

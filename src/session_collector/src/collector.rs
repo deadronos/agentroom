@@ -66,8 +66,8 @@ impl Collector {
             collector_id: self.collector_id.clone(),
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as i64,
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0),
             fingerprint: fingerprint.clone(),
             sessions,
         };
@@ -82,8 +82,8 @@ impl Collector {
         let threshold_ms = 300000u64; // 5 minutes
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
         let threshold = now - threshold_ms as i64;
         let mut all_sessions = Vec::new();
 
@@ -92,6 +92,10 @@ impl Collector {
                 continue;
             }
             let sessions = adapter.active_sessions(threshold_ms);
+            let session_count = sessions.len();
+            if session_count == 0 {
+                tracing::debug!("Adapter {:?} returned 0 sessions (may be expected if no agents are running)", adapter.name());
+            }
             for session in sessions {
                 if session.last_activity >= threshold {
                     all_sessions.push(session);

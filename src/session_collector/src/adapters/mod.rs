@@ -1,13 +1,13 @@
 mod claude;
-mod openclaw;
-mod copilot;
 mod codex;
-mod opencode;
+mod copilot;
 mod gemini;
+mod openclaw;
+mod opencode;
 
 pub use claude::ClaudeAdapter;
-pub use openclaw::OpenClawAdapter;
 pub use copilot::CopilotAdapter;
 pub use codex::CodexAdapter;
-pub use opencode::OpenCodeAdapter;
 pub use gemini::GeminiAdapter;
+pub use openclaw::OpenClawAdapter;
+pub use opencode::OpenCodeAdapter;

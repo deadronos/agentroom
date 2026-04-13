@@ -113,21 +113,29 @@ fn scan_chats_dirs() -> Vec<PathBuf> {
 fn parse_timestamp(ts: &str) -> i64 {
     // Parse RFC3339 timestamp like "2024-01-15T10:30:00Z" or "2024-01-15T10:30:00+00:00"
     // Format: YYYY-MM-DDTHH:MM:SS[timezone]
-    let parts: Vec<&str> = ts.split(&['T', '-', ':', '+', 'Z', 'z'][..]).collect();
-    if parts.len() < 6 {
-        return 0;
-    }
-    let year: i64 = parts[0].parse().unwrap_or(0);
-    let month: i64 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
-    let day: i64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(1);
-    let hour: i64 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
-    let minute: i64 = parts.get(4).and_then(|s| s.parse().ok()).unwrap_or(0);
-    let second: i64 = parts.get(5).and_then(|s| s.parse().ok()).unwrap_or(0);
+    // First split on T to separate date and time parts
+    if let Some((date_part, time_part)) = ts.split_once('T') {
+        let mut parts: Vec<&str> = time_part
+            .trim_end_matches('Z')
+            .trim_end_matches('z')
+            .split(&[':', '+'][..])
+            .collect();
 
-    // Days from year 0 to given date (simplified, ignoring timezone offset for now)
-    let days = date_to_days(year, month, day);
-    let total_seconds = days * 86400 + hour * 3600 + minute * 60 + second;
-    total_seconds * 1000
+        let year: i64 = date_part.get(0..4).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let month: i64 = date_part.get(5..7).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let day: i64 = date_part.get(8..10).and_then(|s| s.parse().ok()).unwrap_or(0);
+
+        let hour: i64 = parts.get(0).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let minute: i64 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let second: i64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+
+        // Days from year 0 to given date (simplified, ignoring timezone offset for now)
+        let days = date_to_days(year, month, day);
+        let total_seconds = days * 86400 + hour * 3600 + minute * 60 + second;
+        total_seconds * 1000
+    } else {
+        0
+    }
 }
 
 fn date_to_days(year: i64, month: i64, day: i64) -> i64 {

@@ -78,9 +78,12 @@ impl HubState {
 
         // Broadcast session_ended events for ended sessions
         for session_id in &ended {
+            let provider = write.get(session_id)
+                .map(|s| s.provider.clone())
+                .unwrap_or_else(|| "unknown".to_string());
             let msg = HubMessage::SessionEnded {
                 session_id: session_id.clone(),
-                provider: "unknown".to_string(),
+                provider,
                 timestamp: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
