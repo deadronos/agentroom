@@ -894,7 +894,7 @@ pub async fn cass_sessions(days: Option<u32>) -> Result<String, String> {
 #[tauri::command]
 pub async fn cass_transcript(path: String) -> Result<String, String> {
     let output = tokio::process::Command::new(cass_bin())
-        .args(["export", &path, "--format", "json"])
+        .args(["export", "--format", "json", "--", &path])
         .output()
         .await
         .map_err(|e| e.to_string())?;
