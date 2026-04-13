@@ -3242,6 +3242,7 @@ dependencies = [
  "futures-util",
  "hostname",
  "notify 6.1.1",
+ "parking_lot",
  "serde",
  "serde_json",
  "session_common",
