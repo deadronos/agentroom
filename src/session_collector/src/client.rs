@@ -42,7 +42,7 @@ impl HubClient {
         }
 
         // Slow path: connect — release lock before network call to avoid races
-        let url_with_token = format!("{}?token={}", self.url, self.token);
+        let url_with_token = format!("{}?token={}", self.url, urlencoding::encode(&self.token));
         tracing::debug!("Connecting to hub at {}", self.url);
 
         match connect_async(Url::parse(&url_with_token)?).await {

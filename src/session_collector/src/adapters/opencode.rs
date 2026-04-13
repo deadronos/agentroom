@@ -135,10 +135,25 @@ impl SessionAdapter for OpenCodeAdapter {
     }
 
     fn session_detail(&self, session_id: &str) -> Option<ActiveSession> {
-        let path_str = session_id.strip_prefix("opencode:")?;
-        let path = PathBuf::from(path_str);
+        let stem = session_id.strip_prefix("opencode:")?;
+
+        // Find the session file by walking the log directory
+        let log_dir = Self::log_dir();
+        if !log_dir.exists() {
+            return None;
+        }
+
+        let mut paths = Vec::new();
+        let _ = walkdir_recursive(&log_dir, &mut paths, 0, 10);
+
+        let path = paths.iter().find(|p| {
+            p.extension().and_then(|s| s.to_str()) == Some("jsonl")
+                && p.file_stem().and_then(|s| s.to_str()) == Some(stem)
+        })?;
+
         let (last_message, last_tool, last_activity) =
-            Self::read_last_jsonl_entry(&path).unwrap_or((None, None, 0));
+            Self::read_last_jsonl_entry(path).unwrap_or((None, None, 0));
+
         Some(ActiveSession {
             session_id: session_id.to_string(),
             provider: "opencode".to_string(),

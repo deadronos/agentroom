@@ -4,7 +4,6 @@ use session_common::{CollectorMessage, HubMessage};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
-use tokio_tungstenite::accept_async;
 use futures_util::{SinkExt, StreamExt};
 
 #[allow(dead_code)]
@@ -30,11 +29,11 @@ impl HubServer {
         let collector_addr = format!("0.0.0.0:{}", self.collector_port);
         let collector_listener = TcpListener::bind(&collector_addr).await?;
         tracing::info!("Collector WebSocket server listening on {}", collector_addr);
-        
+
         let frontend_addr = format!("0.0.0.0:{}", self.frontend_port);
         let frontend_listener = TcpListener::bind(&frontend_addr).await?;
         tracing::info!("Frontend WebSocket server listening on {}", frontend_addr);
-        
+
         let collector_state = self.state.clone();
         let collector_auth = self.auth.clone();
         tokio::spawn(async move {
@@ -55,7 +54,7 @@ impl HubServer {
                 }
             }
         });
-        
+
         let frontend_state = self.state.clone();
         tokio::spawn(async move {
             loop {
@@ -74,7 +73,7 @@ impl HubServer {
                 }
             }
         });
-        
+
         let cleanup_state = self.state.clone();
         let cleanup_auth = self.auth.clone();
         tokio::spawn(async move {
@@ -88,7 +87,7 @@ impl HubServer {
                 }
             }
         });
-        
+
         tokio::signal::ctrl_c().await?;
         Ok(())
     }
@@ -192,7 +191,7 @@ async fn handle_frontend_connection(
     stream: tokio::net::TcpStream,
     state: HubState,
 ) -> anyhow::Result<()> {
-    let ws_stream = accept_async(stream).await?;
+    let ws_stream = tokio_tungstenite::accept_async(stream).await?;
     let (mut write, mut read) = ws_stream.split();
 
     // Send initial state sync
