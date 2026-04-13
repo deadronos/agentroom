@@ -1058,6 +1058,7 @@ pub async fn tag_session(
         if let Some(model_name) = model_override.as_deref() {
             command.args(["--model", model_name]);
         }
+        command.arg("--");
         command.arg(&prompt);
         let label = match model_override.as_deref() {
             Some(model_name) => format!("gemini:{model_name}"),
@@ -1073,6 +1074,7 @@ pub async fn tag_session(
                 "json",
                 "--model",
                 &model_name,
+                "--",
                 &prompt,
             ])
             .output()
