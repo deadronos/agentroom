@@ -328,8 +328,11 @@ impl SessionAdapter for OpenClawAdapter {
         let project = Self::extract_cwd_from_session(&path)
             .or_else(|| path.parent().map(|p| p.to_string_lossy().to_string()));
 
+        // Reconstruct the full session_id (same format as active_sessions)
+        let full_session_id = Self::build_session_id(&agent_id, &session_id);
+
         Some(ActiveSession {
-            session_id: session_id.to_string(),
+            session_id: full_session_id,
             provider: "openclaw".to_string(),
             agent_id: Some(agent_id),
             agent_type: "main".to_string(),

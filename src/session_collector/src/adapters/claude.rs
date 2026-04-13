@@ -220,11 +220,11 @@ impl SessionAdapter for ClaudeAdapter {
     }
 
     fn active_sessions(&self, threshold_ms: u64) -> Vec<ActiveSession> {
-        let now_secs = std::time::SystemTime::now()
+        let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_secs() as i64;
-        let threshold_secs = now_secs - (threshold_ms / 1000) as i64;
+            .as_millis() as i64;
+        let threshold = now_ms - threshold_ms as i64;
         let mut sessions = Vec::new();
 
         // Step 1: Parse history.jsonl to build sessions map keyed by sessionId
@@ -262,7 +262,7 @@ impl SessionAdapter for ClaudeAdapter {
 
             // Skip if BOTH history timestamp AND file mtime are too old
             // entry.timestamp = when session started, mtime_ms = when session was last active
-            if entry.timestamp < threshold_secs * 1000 && mtime_ms < threshold_secs * 1000 {
+            if entry.timestamp < threshold && mtime_ms < threshold {
                 continue;
             }
 
@@ -347,7 +347,7 @@ impl SessionAdapter for ClaudeAdapter {
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap()
                         .as_millis() as i64;
-                    if mtime_ms < threshold_secs * 1000 {
+                    if mtime_ms < threshold {
                         continue;
                     }
 
@@ -392,8 +392,9 @@ impl SessionAdapter for ClaudeAdapter {
             // If this looks like an agent ID (not just another part of the session ID),
             // check if there's a subagent file for it
             let test_session_id = &session_id[..idx];
+            // Try with empty project first (same logic as before for compatibility)
             let subagent_path = Self::projects_dir()
-                .join(Self::encode_project_path("")) // Will need project info from history
+                .join("") // Empty project encoded
                 .join(test_session_id)
                 .join("subagents")
                 .join(format!("agent-{}.jsonl", potential_agent_id));
